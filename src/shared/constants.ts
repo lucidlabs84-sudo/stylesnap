@@ -198,7 +198,7 @@ export const CSS_KEY_PROPERTIES = [
 
 export const DAILY_FREE_LIMIT = 20
 export const PRO_PRICE_USD = 29
-export const PROXY_BASE_URL = 'https://stylesnap-proxy.vercel.app'
+export const PROXY_BASE_URL = 'https://stylesnap-proxy-flame.vercel.app'
 
 export const STORAGE_KEYS = {
   LICENSE: 'stylesnap_license',

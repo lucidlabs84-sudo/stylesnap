@@ -4,7 +4,7 @@
  *
  * Uses DodoPayments License Key system via secure proxy API.
  * Flow: checkout → payment → license key returned → activate on device → validate periodically
- * Proxy: https://stylesnap-proxy.vercel.app
+ * Proxy: https://stylesnap-proxy-flame.vercel.app
  */
 import type { LicenseStatus, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
