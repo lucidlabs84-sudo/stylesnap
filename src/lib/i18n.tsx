@@ -111,6 +111,21 @@ const translations = {
     cancel: 'Cancel',
     saveSettings: 'Save Settings',
     saved: 'Saved',
+    // Feedback Modal
+    feedback: 'Feedback',
+    feedbackPraise: 'Love It',
+    feedbackBug: 'Bug',
+    feedbackFeature: 'Request',
+    feedbackGeneral: 'Other',
+    feedbackPlaceholder: 'Tell us what you think…',
+    feedbackRating: 'Overall experience (optional)',
+    feedbackEmailPlaceholder: 'Email (optional, for replies)',
+    feedbackSubmit: 'Send Feedback',
+    feedbackThanks: 'Thank you! 🙌',
+    feedbackThanksDesc: 'We read every message and use it to improve StyleSnap.',
+    feedbackError: 'Failed to submit. Please try again.',
+    feedbackContactHint: 'Need direct help?',
+    close: 'Close',
   },
   zh: {
     // App
@@ -220,6 +235,21 @@ const translations = {
     cancel: '取消',
     saveSettings: '保存设置',
     saved: '已保存',
+    // Feedback Modal
+    feedback: '反馈',
+    feedbackPraise: '很棒',
+    feedbackBug: '报告Bug',
+    feedbackFeature: '功能建议',
+    feedbackGeneral: '其他',
+    feedbackPlaceholder: '告诉我们您的想法…',
+    feedbackRating: '总体体验（可选）',
+    feedbackEmailPlaceholder: '邮箱（可选，方便回复）',
+    feedbackSubmit: '提交反馈',
+    feedbackThanks: '感谢您的反馈！🙌',
+    feedbackThanksDesc: '我们会认真阅读每一条反馈，用于持续改进 StyleSnap。',
+    feedbackError: '提交失败，请重试。',
+    feedbackContactHint: '需要直接帮助？',
+    close: '关闭',
   }
 }
 

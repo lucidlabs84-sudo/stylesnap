@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Scan, Package, Palette, Settings, Crown, Languages } from 'lucide-react'
+import { Scan, Package, Palette, Settings, Crown, Languages, MessageSquare } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { clsx } from 'clsx'
 import InspectTab    from './tabs/InspectTab'
@@ -7,6 +7,7 @@ import ExportTab     from './tabs/ExportTab'
 import TokensTab     from './tabs/TokensTab'
 import SettingsModal from './components/SettingsModal'
 import UpgradeModal  from './components/UpgradeModal'
+import FeedbackModal from './components/FeedbackModal'
 import type { ParsedCSS, LicenseStatus } from '@/shared/types'
 import { getLicenseStatus } from '@/lib/license'
 import { I18nProvider, useI18n } from '@/lib/i18n'
@@ -42,6 +43,7 @@ function AppContent() {
   const [license,        setLicense]        = useState<LicenseStatus | null>(null)
   const [showSettings,   setShowSettings]   = useState(false)
   const [showUpgrade,    setShowUpgrade]    = useState(false)
+  const [showFeedback,   setShowFeedback]   = useState(false)
 
   // ── Load license ────────────────────────────────────────────────────────
   useEffect(() => { getLicenseStatus().then(setLicense) }, [])
@@ -139,6 +141,13 @@ function AppContent() {
             </button>
           )}
           <button
+            onClick={() => setShowFeedback(true)}
+            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+            title={t('feedback')}
+          >
+            <MessageSquare size={14} />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
             className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             title={t('settings')}
@@ -228,6 +237,9 @@ function AppContent() {
       )}
       {showUpgrade && (
         <UpgradeModal onClose={() => setShowUpgrade(false)} />
+      )}
+      {showFeedback && (
+        <FeedbackModal onClose={() => setShowFeedback(false)} />
       )}
     </div>
   )
