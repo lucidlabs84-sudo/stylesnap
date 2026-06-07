@@ -159,7 +159,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
 
               <button
                 onClick={() => {
-                  chrome.tabs.create({ url: 'https://stylesnap.dev' })
+                  chrome.tabs.create({ url: 'https://style.lucidlibs.dev' })
                   onClose()
                 }}
                 className="w-full py-2 text-gray-500 hover:text-gray-300 text-xs flex items-center justify-center gap-1 transition-colors"

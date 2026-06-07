@@ -47,7 +47,7 @@ const translations = {
     instant: '📧 Instant delivery',
     lifetime: '♾️ Lifetime deal',
     upgradeToPro: 'Upgrade to Pro — $29',
-    learnMore: 'Learn more at stylesnap.dev',
+    learnMore: 'Learn more at style.lucidlibs.dev',
     // Checkout
     enterEmailTitle: 'Enter your email for checkout',
     enterEmailDesc: "We'll use this to send your license and receipt via Dodo Payments.",
@@ -171,7 +171,7 @@ const translations = {
     instant: '📧 即时开通',
     lifetime: '♾️ 终身授权',
     upgradeToPro: '升级到专业版 — $29',
-    learnMore: '访问 stylesnap.dev 了解更多',
+    learnMore: '访问 style.lucidlibs.dev 了解更多',
     // Checkout
     enterEmailTitle: '请输入您的邮箱',
     enterEmailDesc: '我们将使用此邮箱通过 Dodo Payments 发送您的许可证和收据。',
