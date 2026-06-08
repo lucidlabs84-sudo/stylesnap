@@ -253,7 +253,10 @@ function AppContent() {
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
       {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} />
+        <SettingsModal 
+          onClose={() => setShowSettings(false)} 
+          onLicenseChange={refreshLicense}
+        />
       )}
       {showUpgrade && (
         <UpgradeModal

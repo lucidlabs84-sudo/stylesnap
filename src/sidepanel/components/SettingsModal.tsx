@@ -6,11 +6,12 @@ import { useI18n } from '@/lib/i18n'
 
 interface SettingsModalProps {
   onClose: () => void
+  onLicenseChange?: () => void
 }
 
 type ThemeOption = 'light' | 'dark' | 'system'
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onLicenseChange }) => {
   const { t } = useI18n()
 
   const THEME_OPTIONS: { value: ThemeOption; label: string; icon: React.ReactNode }[] = [
@@ -71,6 +72,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
       const l = await getLicenseStatus()
       setLicense(l)
       setLicenseKeyInput('')
+      onLicenseChange?.()
     } else {
       const msg = result.limitReached
         ? (t('activationLimitReached') || 'Activation limit reached (2 devices max). Deactivate another device first.')
@@ -88,6 +90,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     setLicenseKeyInput('')
     setActivateResult(null)
     setDeactivating(false)
+    onLicenseChange?.()
   }
 
   if (!settings || !license) {
