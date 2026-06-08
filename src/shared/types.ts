@@ -96,12 +96,20 @@ export interface Message<T = unknown> {
 // ── License ───────────────────────────────────────────────────────────────────
 
 export interface LicenseStatus {
-  isPro:           boolean
-  dailyUsed:       number
-  dailyLimit:      number
-  email?:          string
-  licenseKey?:     string
-  instanceId?:     string   // DodoPayments activation instance ID
+  isPro:              boolean
+  dailyUsed:          number
+  dailyLimit:         number
+  email?:             string
+  licenseKey?:        string
+  instanceId?:        string        // DodoPayments activation instance ID (e.g. "lki_123")
+  licenseKeyId?:      string        // DodoPayments license key ID (e.g. "lic_123") — for admin API calls
+  customerName?:      string        // From activation response
+  productName?:       string        // From activation response
+  activationsUsed?:   number        // Current instance count
+  activationsLimit?:  number        // Max allowed activations (null = unlimited)
+  licenseStatus?:     'active' | 'expired' | 'disabled'  // DodoPayments key status
+  expiresAt?:         string | null // Expiry date (null = never expires)
+  activatedAt?:       string        // When this instance was activated
 }
 
 // ── User Settings ─────────────────────────────────────────────────────────────

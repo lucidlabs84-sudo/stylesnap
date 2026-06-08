@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { X, Key, Moon, Sun, Monitor, Trash2, Check, AlertCircle, Loader2 } from 'lucide-react'
+import { X, Key, Moon, Sun, Monitor, Trash2, Check, AlertCircle, Loader2, Shield, Smartphone, Clock, Calendar } from 'lucide-react'
 import { getSettings, saveSettings, getLicenseStatus, activateLicenseKey, deactivateLicenseInstance } from '../../lib/license'
 import type { UserSettings, LicenseStatus } from '../../shared/types'
 import { useI18n } from '@/lib/i18n'
@@ -98,6 +98,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
     )
   }
 
+  // License status badge color
+  const statusColor = license.licenseStatus === 'active' ? 'green'
+    : license.licenseStatus === 'expired' ? 'amber'
+    : license.licenseStatus === 'disabled' ? 'red'
+    : 'green' // default for Pro without explicit status
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}>
@@ -125,10 +131,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
             </h3>
             {license.isPro ? (
               <div className="space-y-2">
-                <div className="flex items-center justify-between bg-green-900/20 border border-green-700/40 rounded-lg px-3 py-2">
+                {/* Status badge */}
+                <div className={`flex items-center justify-between bg-${statusColor}-900/20 border border-${statusColor}-700/40 rounded-lg px-3 py-2`}>
                   <div className="flex items-center gap-2">
-                    <Check size={14} className="text-green-400" />
-                    <span className="text-xs text-green-300 font-medium">{t('proActivated')}</span>
+                    <Check size={14} className={`text-${statusColor}-400`} />
+                    <span className={`text-xs text-${statusColor}-300 font-medium`}>
+                      {license.licenseStatus === 'expired' ? (t('licenseExpired') || 'License Expired')
+                        : license.licenseStatus === 'disabled' ? (t('licenseDisabled') || 'License Disabled')
+                        : (t('proActivated') || 'StyleSnap Pro — Activated')}
+                    </span>
                   </div>
                   <button
                     onClick={handleDeactivate}
@@ -139,9 +150,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     {t('remove')}
                   </button>
                 </div>
-                {/* Show license key (masked) and activation info */}
-                {license.licenseKey && (
-                  <div className="bg-gray-800 rounded-lg px-3 py-2 space-y-1">
+
+                {/* License details */}
+                <div className="bg-gray-800 rounded-lg px-3 py-2 space-y-1.5">
+                  {/* License key (masked) */}
+                  {license.licenseKey && (
                     <div className="flex justify-between text-xs">
                       <span className="text-gray-500">{t('licenseKeyLabel') || 'License Key'}</span>
                       <span className="text-gray-300 font-mono">
@@ -150,8 +163,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                           : license.licenseKey.substring(0, 4) + '••••'}
                       </span>
                     </div>
-                  </div>
-                )}
+                  )}
+
+                  {/* Email */}
+                  {license.email && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">{t('emailLabel') || 'Email'}</span>
+                      <span className="text-gray-300 truncate ml-2 max-w-[180px]">{license.email}</span>
+                    </div>
+                  )}
+
+                  {/* Activations */}
+                  {(license.activationsUsed !== undefined || license.activationsLimit !== undefined) && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500 flex items-center gap-1">
+                        <Smartphone size={10} />
+                        {t('devicesLabel') || 'Devices'}
+                      </span>
+                      <span className="text-gray-300">
+                        {license.activationsUsed ?? '?'}/{license.activationsLimit ?? '∞'}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Instance ID */}
+                  {license.instanceId && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500 flex items-center gap-1">
+                        <Shield size={10} />
+                        {t('instanceIdLabel') || 'Instance'}
+                      </span>
+                      <span className="text-gray-400 font-mono text-[10px]">
+                        {license.instanceId.length > 12
+                          ? license.instanceId.substring(0, 8) + '•••'
+                          : license.instanceId}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Activated at */}
+                  {license.activatedAt && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500 flex items-center gap-1">
+                        <Clock size={10} />
+                        {t('activatedAtLabel') || 'Activated'}
+                      </span>
+                      <span className="text-gray-400 text-[10px]">
+                        {new Date(license.activatedAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Expires */}
+                  {license.expiresAt && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500 flex items-center gap-1">
+                        <Calendar size={10} />
+                        {t('expiresAtLabel') || 'Expires'}
+                      </span>
+                      <span className="text-gray-400 text-[10px]">
+                        {new Date(license.expiresAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-2">

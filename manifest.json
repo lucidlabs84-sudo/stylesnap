@@ -39,7 +39,10 @@
     "clipboardWrite"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://api.lucidlibs.dev/*",
+    "https://test.dodopayments.com/*",
+    "https://live.dodopayments.com/*"
   ],
   "web_accessible_resources": [
     {

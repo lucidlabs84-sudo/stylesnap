@@ -9,7 +9,7 @@ import SettingsModal from './components/SettingsModal'
 import UpgradeModal  from './components/UpgradeModal'
 import FeedbackModal from './components/FeedbackModal'
 import type { ParsedCSS, LicenseStatus } from '@/shared/types'
-import { getLicenseStatus } from '@/lib/license'
+import { getLicenseStatus, checkAndValidateLicense, checkUrlForLicenseKey } from '@/lib/license'
 import { I18nProvider, useI18n } from '@/lib/i18n'
 
 // ─── Message types from content script ──────────────────────────────────────
@@ -45,8 +45,28 @@ function AppContent() {
   const [showUpgrade,    setShowUpgrade]    = useState(false)
   const [showFeedback,   setShowFeedback]   = useState(false)
 
-  // ── Load license ────────────────────────────────────────────────────────
-  useEffect(() => { getLicenseStatus().then(setLicense) }, [])
+  // ── Load license + startup validation + URL detection ───────────────────
+  useEffect(() => {
+    (async () => {
+      // 1. Check URL for license_key param (from DodoPayments redirect after payment)
+      const autoActivated = await checkUrlForLicenseKey()
+
+      // 2. Periodic license validation (every 24h)
+      if (!autoActivated) {
+        await checkAndValidateLicense()
+      }
+
+      // 3. Load current license status
+      const status = await getLicenseStatus()
+      setLicense(status)
+    })()
+  }, [])
+
+  // ── Refresh license helper ─────────────────────────────────────────────
+  const refreshLicense = useCallback(async () => {
+    const status = await getLicenseStatus()
+    setLicense(status)
+  }, [])
 
   // ── Listen for messages from content script ──────────────────────────────
   useEffect(() => {
@@ -236,7 +256,10 @@ function AppContent() {
         <SettingsModal onClose={() => setShowSettings(false)} />
       )}
       {showUpgrade && (
-        <UpgradeModal onClose={() => setShowUpgrade(false)} />
+        <UpgradeModal
+          onClose={() => setShowUpgrade(false)}
+          onActivated={refreshLicense}
+        />
       )}
       {showFeedback && (
         <FeedbackModal onClose={() => setShowFeedback(false)} />

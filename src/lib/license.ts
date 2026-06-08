@@ -5,6 +5,13 @@
  * Uses DodoPayments License Key system via secure proxy API.
  * Flow: checkout → payment → license key returned → activate on device → validate periodically
  * Proxy: https://api.lucidlibs.dev
+ *
+ * DodoPayments API mapping:
+ * - POST /licenses/activate   → public, returns { id, customer, product }
+ * - POST /licenses/validate   → public, returns { valid: boolean }
+ * - POST /licenses/deactivate → public, 200 on success
+ * - GET  /license_keys        → API key required, returns { items: [{ id, key, status, instances_count, ... }] }
+ * - GET  /license_key_instances → API key required, returns { items: [{ id, name, created_at }] }
  */
 import type { LicenseStatus, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
@@ -39,12 +46,20 @@ export async function getLicenseStatus(): Promise<LicenseStatus> {
 
   if (stored?.isPro) {
     return {
-      isPro:           true,
+      isPro:              true,
       dailyUsed,
-      dailyLimit:      Infinity,
-      email:           stored.email,
-      licenseKey:      stored.licenseKey,
-      instanceId:      stored.instanceId,
+      dailyLimit:         Infinity,
+      email:              stored.email,
+      licenseKey:         stored.licenseKey,
+      instanceId:         stored.instanceId,
+      licenseKeyId:       stored.licenseKeyId,
+      customerName:       stored.customerName,
+      productName:        stored.productName,
+      activationsUsed:    stored.activationsUsed,
+      activationsLimit:   stored.activationsLimit,
+      licenseStatus:      stored.licenseStatus,
+      expiresAt:          stored.expiresAt,
+      activatedAt:        stored.activatedAt,
     }
   }
 
@@ -70,7 +85,7 @@ export async function recordUsage(): Promise<boolean> {
 
 /**
  * Creates a DodoPayments checkout session via our secure proxy.
- * After payment, the return_url will include ?license_key=PRO-XXXX&email=...
+ * After payment, the return_url will include ?license_key=xxx&email=xxx
  * Returns the hosted checkout URL for the user to complete payment.
  */
 export async function createCheckout(email?: string): Promise<string> {
@@ -96,7 +111,8 @@ export async function createCheckout(email?: string): Promise<string> {
 
 /**
  * Activates a License Key on this device.
- * Creates an activation instance via DodoPayments /licenses/activate.
+ * Creates an activation instance via DodoPayments POST /licenses/activate.
+ * DodoPayments returns: { id (instance_id), customer: { email, name }, product: { name, product_id }, created_at }
  * Returns true if activation succeeded.
  */
 export async function activateLicenseKey(licenseKey: string): Promise<{
@@ -127,13 +143,17 @@ export async function activateLicenseKey(licenseKey: string): Promise<{
       }
     }
 
-    // Store license with activation info
+    // Store license with full activation info from DodoPayments
     const payload: Partial<LicenseStatus> = {
       isPro:            true,
       dailyUsed:        0,
       dailyLimit:       Infinity,
       licenseKey:       key,
       instanceId:       data.instance_id,
+      email:            data.customer_email || '',
+      customerName:     data.customer_name || '',
+      productName:      data.product_name || '',
+      activatedAt:      data.created_at || new Date().toISOString(),
     }
     await chrome.storage.local.set({ [STORAGE_KEYS.LICENSE]: payload })
     return { success: true }
@@ -144,23 +164,29 @@ export async function activateLicenseKey(licenseKey: string): Promise<{
 }
 
 /**
- * Validates a License Key via DodoPayments /licenses/validate.
+ * Validates a License Key via DodoPayments POST /licenses/validate.
+ * Optionally passes instance_id for instance-specific validation.
  * Used for periodic checks (e.g., every 24h or on startup).
+ * DodoPayments returns: { valid: boolean }
  */
-export async function validateLicense(licenseKey: string): Promise<{
+export async function validateLicense(licenseKey: string, instanceId?: string): Promise<{
   valid: boolean
-  expiresAt?: string | null
 }> {
   try {
+    const body: Record<string, string> = { license_key: licenseKey.trim() }
+    if (instanceId) {
+      body.instance_id = instanceId
+    }
+
     const res = await fetch(`${PROXY_BASE_URL}/api/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ license_key: licenseKey.trim() }),
+      body: JSON.stringify(body),
     })
     const data = await res.json()
 
     if (data.valid) {
-      // Update stored activation info
+      // Refresh stored license data
       const current = await getLicenseStatus()
       const payload: Partial<LicenseStatus> = {
         ...current,
@@ -170,7 +196,6 @@ export async function validateLicense(licenseKey: string): Promise<{
 
     return {
       valid: data.valid === true,
-      expiresAt: data.expires_at,
     }
   } catch {
     // Network error — trust local cache, don't revoke
@@ -180,6 +205,7 @@ export async function validateLicense(licenseKey: string): Promise<{
 
 /**
  * Deactivates this device's license instance (releases the activation slot).
+ * DodoPayments: POST /licenses/deactivate { license_key, license_key_instance_id }
  * Call before uninstalling or when user wants to transfer to another device.
  */
 export async function deactivateLicenseInstance(): Promise<boolean> {
@@ -208,6 +234,44 @@ export async function deactivateLicenseInstance(): Promise<boolean> {
     // Network error — still clear local (user can re-activate later)
     await chrome.storage.local.remove(STORAGE_KEYS.LICENSE)
     return false
+  }
+}
+
+// ─── License Key Details (via admin API) ────────────────────────────────────
+
+/**
+ * Fetches detailed license info from DodoPayments /license_keys endpoint.
+ * Requires API key (handled by proxy server).
+ * Returns: { id, key, status, instances_count, activations_limit, expires_at, ... }
+ */
+export async function getLicenseKeyDetails(licenseKeyId: string): Promise<{
+  success: boolean
+  data?: {
+    id: string
+    key: string
+    status: 'active' | 'expired' | 'disabled'
+    instances_count: number
+    activations_limit: number | null
+    expires_at: string | null
+    created_at: string
+    source: 'auto' | 'import' | 'manual'
+    customer_id: string
+    product_id: string
+  }
+  error?: string
+}> {
+  try {
+    // This calls our proxy's admin endpoint which proxies to DodoPayments
+    const res = await fetch(`${PROXY_BASE_URL}/api/admin/licenses?id=${encodeURIComponent(licenseKeyId)}`, {
+      method: 'GET',
+    })
+    const data = await res.json()
+    if (data.error) {
+      return { success: false, error: data.error }
+    }
+    return { success: true, data }
+  } catch {
+    return { success: false, error: 'Failed to fetch license details.' }
   }
 }
 
@@ -274,7 +338,8 @@ export async function checkAndValidateLicense(): Promise<boolean> {
     return true
   }
 
-  const result = await validateLicense(status.licenseKey)
+  // Pass instance_id for instance-specific validation
+  const result = await validateLicense(status.licenseKey, status.instanceId)
 
   if (!result.valid) {
     // License revoked — clear Pro status
