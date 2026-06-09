@@ -262,12 +262,18 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
                 {activating ? <Loader2 size={16} className="animate-spin" /> : <><Key size={14} /> {t('activateLicense') || 'Activate'}</>}
               </button>
             </div>
-            <div className="mt-4 flex justify-center">
+            <div className="mt-4 flex justify-center gap-4">
               <button
                 onClick={() => setStep('checkout')}
                 className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
               >
                 {t('needToPurchase') || "Don't have a key? Purchase now →"}
+              </button>
+              <button
+                onClick={() => chrome.tabs.create({ url: 'https://style.lucidlibs.dev/recover' })}
+                className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                {t('forgotLicenseKey') || 'Forgot your license key?'}
               </button>
             </div>
           </div>
