@@ -94,8 +94,8 @@ export async function createCheckout(email?: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email: email?.trim() || undefined,
-      return_url: chrome.runtime?.getURL('sidepanel/index.html') || 'https://style.lucidlibs.dev/success',
-      cancel_url: 'https://style.lucidlibs.dev',
+      return_url: chrome.runtime?.getURL('sidepanel/index.html') || 'https://lucidlibs.dev/stylesnap/success',
+      cancel_url: 'https://lucidlibs.dev/stylesnap',
     }),
   })
 

@@ -267,7 +267,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onLicense
                 )}
                 {/* Forgot license key? */}
                 <button
-                  onClick={() => chrome.tabs.create({ url: 'https://style.lucidlibs.dev/recover' })}
+                  onClick={() => chrome.tabs.create({ url: 'https://lucidlibs.dev/stylesnap/recover' })}
                   className="text-[11px] text-indigo-400 hover:text-indigo-300 transition-colors"
                 >
                   {t('forgotLicenseKey') || 'Forgot your license key?'}

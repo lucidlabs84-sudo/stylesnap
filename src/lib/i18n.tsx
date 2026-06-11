@@ -2,6 +2,64 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 
 type Language = 'en' | 'zh'
 
+/** Country code → language mapping for IP-based detection */
+const COUNTRY_LANG_MAP: Record<string, Language> = {
+  CN: 'zh',
+  TW: 'zh',
+  HK: 'zh',
+  MO: 'zh',
+  SG: 'zh',
+}
+
+/** Detect language from browser's navigator */
+function detectFromBrowser(): Language | null {
+  const langs = navigator.languages || [navigator.language]
+  for (const l of langs) {
+    if (l.startsWith('zh')) return 'zh'
+  }
+  return null
+}
+
+/** Detect language from IP geolocation (async, may fail) */
+async function detectFromIP(): Promise<Language | null> {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+    const res = await fetch('https://ipapi.co/json/', { signal: controller.signal })
+    clearTimeout(timeout)
+    if (!res.ok) return null
+    const data = await res.json()
+    const country: string = data.country_code
+    return COUNTRY_LANG_MAP[country] ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Detect language with full priority chain:
+ * 1. chrome.storage (user's explicit saved choice)
+ * 2. Browser language
+ * 3. IP geolocation
+ * 4. Fallback "en"
+ */
+async function detectLang(): Promise<Language> {
+  // 1. Check saved preference
+  const stored = await chrome.storage.local.get(['language'])
+  if (stored.language === 'zh' || stored.language === 'en') return stored.language
+
+  // 2. Browser language
+  const browser = detectFromBrowser()
+  if (browser) return browser
+
+  // 3. IP geolocation
+  const ip = await detectFromIP()
+  if (ip) return ip
+
+  // 4. Fallback
+  return 'en'
+}
+
 const translations = {
   en: {
     // App
@@ -47,7 +105,7 @@ const translations = {
     instant: '📧 Instant delivery',
     lifetime: '♾️ Lifetime deal',
     upgradeToPro: 'Upgrade to Pro — $29',
-    learnMore: 'Learn more at style.lucidlibs.dev',
+    learnMore: 'Learn more at lucidlibs.dev/stylesnap',
     // Checkout
     enterEmailTitle: 'Enter your email for checkout',
     enterEmailDesc: "We'll use this to send your license and receipt via Dodo Payments.",
@@ -179,7 +237,7 @@ const translations = {
     instant: '📧 即时开通',
     lifetime: '♾️ 终身授权',
     upgradeToPro: '升级到专业版 — $29',
-    learnMore: '访问 style.lucidlibs.dev 了解更多',
+    learnMore: '访问 lucidlibs.dev/stylesnap 了解更多',
     // Checkout
     enterEmailTitle: '请输入您的邮箱',
     enterEmailDesc: '我们将使用此邮箱通过 Dodo Payments 发送您的许可证和收据。',
@@ -283,13 +341,8 @@ export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [lang, setLangState] = useState<Language>('en')
 
   useEffect(() => {
-    chrome.storage.local.get(['language']).then(res => {
-      if (res.language === 'zh' || res.language === 'en') {
-        setLangState(res.language)
-      } else {
-        const browserLang = navigator.language.startsWith('zh') ? 'zh' : 'en'
-        setLangState(browserLang)
-      }
+    detectLang().then(detected => {
+      setLangState(detected)
     })
   }, [])
 

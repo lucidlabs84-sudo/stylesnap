@@ -159,7 +159,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
 
               <button
                 onClick={() => {
-                  chrome.tabs.create({ url: 'https://style.lucidlibs.dev' })
+                  chrome.tabs.create({ url: 'https://lucidlibs.dev/stylesnap' })
                   onClose()
                 }}
                 className="w-full py-2 text-gray-500 hover:text-gray-300 text-xs flex items-center justify-center gap-1 transition-colors"
@@ -270,7 +270,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
                 {t('needToPurchase') || "Don't have a key? Purchase now →"}
               </button>
               <button
-                onClick={() => chrome.tabs.create({ url: 'https://style.lucidlibs.dev/recover' })}
+                onClick={() => chrome.tabs.create({ url: 'https://lucidlibs.dev/stylesnap/recover' })}
                 className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
               >
                 {t('forgotLicenseKey') || 'Forgot your license key?'}
