@@ -54,7 +54,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (err) { /* ignore */ }
         
         if (response && response.ok) {
-          // Side panel is open, close it by disabling and re-enabling
+          // Side panel is open, close it by setting behavior and closing
+          // For MV3, we can't programmatically close it directly if it's already open.
+          // The best approach is to open an empty popup or just let the user close it.
+          // However, disabling it temporarily works on some Chrome versions.
           chrome.sidePanel.setOptions({ tabId, enabled: false }).then(() => {
             setTimeout(() => {
               chrome.sidePanel.setOptions({ tabId, enabled: true }).catch(console.error)
@@ -62,7 +65,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }).catch(console.error)
         } else {
           // Side panel is closed, open it
-          chrome.sidePanel.open({ windowId }).catch(console.error)
+          chrome.sidePanel.open({ tabId, windowId }).catch(console.error)
         }
       })
     }

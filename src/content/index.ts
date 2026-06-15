@@ -818,10 +818,9 @@ async function initFloatingButton() {
     actionPanel?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, (res) => {
-        // Fallback for older Chrome versions or if background script is not ready
-        if (chrome.runtime.lastError || !res) {
-          console.warn('Could not toggle side panel via background, it may already be open or extension needs reload')
+      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
+        if (chrome.runtime.lastError) {
+          console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
         }
       })
     })
