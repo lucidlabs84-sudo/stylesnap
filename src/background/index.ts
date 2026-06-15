@@ -44,33 +44,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Toggle side panel from content script
+  // NOTE: chrome.sidePanel.open() requires a user gesture context.
+  // The message is sent synchronously from a click handler in the content script,
+  // so the call here is still within the gesture window — DO NOT wrap it in
+  // any async callback (e.g. PING round-trip), as that will break the gesture context.
   if (message.type === 'TOGGLE_SIDE_PANEL') {
     const tabId = sender.tab?.id
     const windowId = sender.tab?.windowId
     if (tabId && windowId) {
-      chrome.runtime.sendMessage({ type: 'PING_SIDE_PANEL' }, (response) => {
-        // Clear lastError
-        const err = chrome.runtime.lastError;
-        if (err) { /* ignore */ }
-        
-        if (response && response.ok) {
-          // Side panel is open, close it by setting behavior and closing
-          // For MV3, we can't programmatically close it directly if it's already open.
-          // The best approach is to open an empty popup or just let the user close it.
-          // However, disabling it temporarily works on some Chrome versions.
-          chrome.sidePanel.setOptions({ tabId, enabled: false }).then(() => {
-            setTimeout(() => {
-              chrome.sidePanel.setOptions({ tabId, enabled: true }).catch(console.error)
-            }, 200)
-          }).catch(console.error)
-        } else {
-          // Side panel is closed, open it
-          chrome.sidePanel.open({ tabId, windowId }).catch(console.error)
-        }
-      })
+      // Directly open the side panel — keeping it synchronous preserves the user gesture context.
+      // Chrome MV3 does not provide a reliable way to programmatically close the side panel,
+      // so we always call open(). If it is already open, the call is a no-op on most Chrome versions.
+      chrome.sidePanel.open({ tabId, windowId }).catch(console.error)
     }
     sendResponse({ ok: true })
-    return true // Keep channel open for async ping response handling
+    return false
   }
 
   // Inject/enable inspector, or edit CSS on current tab
