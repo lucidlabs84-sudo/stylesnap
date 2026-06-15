@@ -485,9 +485,13 @@ function injectFloatingBtnStyles() {
       box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
       font-family: ui-sans-serif, system-ui, sans-serif !important;
       box-sizing: border-box !important;
+      transition: color 0.2s, transform 0.2s !important;
     }
     #stylesnap-floating-btn.is-active .stylesnap-logo-icon {
       color: #10b981 !important;
+    }
+    #stylesnap-floating-btn:active .stylesnap-logo-icon {
+      transform: scale(0.9) !important;
     }
   `
   document.head.appendChild(style)
@@ -501,7 +505,7 @@ function initFloatingButton() {
   const btn = document.createElement('button')
   btn.id = FLOATING_BTN_ID
   btn.setAttribute('data-stylesnap', 'true')
-  btn.title = 'StyleSnap' // 鼠标悬停提示
+  btn.title = 'StyleSnap\nLeft Click: Toggle Inspect\nRight Click: Open Panel\nDrag: Move Button' // 鼠标悬停提示
   
   btn.innerHTML = `
     <div id="stylesnap-floating-btn-inner">
@@ -509,9 +513,94 @@ function initFloatingButton() {
     </div>
   `
 
+  // ─── Drag and Drop Logic ───
+  let isDragging = false
+  let hasMoved = false
+  let startX = 0
+  let startY = 0
+  let initialRight = 24
+  let initialBottom = 24
+
+  // Load saved position
+  chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
+    if (res.stylesnap_btn_pos) {
+      btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
+      btn.style.setProperty('bottom', `${res.stylesnap_btn_pos.bottom}px`, 'important')
+    }
+  })
+
+  btn.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return // Only left click
+    isDragging = true
+    hasMoved = false
+    startX = e.clientX
+    startY = e.clientY
+    
+    // Get current computed style
+    const rect = btn.getBoundingClientRect()
+    initialRight = window.innerWidth - rect.right
+    initialBottom = window.innerHeight - rect.bottom
+    
+    // Add grabbing style
+    btn.style.setProperty('cursor', 'grabbing', 'important')
+    btn.style.setProperty('transition', 'none', 'important') // Disable transition during drag
+    
+    e.preventDefault() // Prevent text selection
+  })
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return
+    
+    const dx = e.clientX - startX
+    const dy = e.clientY - startY
+    
+    // Consider it a drag only if moved more than 3px
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      hasMoved = true
+    }
+    
+    if (hasMoved) {
+      let newRight = initialRight - dx
+      let newBottom = initialBottom - dy
+      
+      // Boundaries
+      const padding = 10
+      const btnSize = 40
+      newRight = Math.max(padding, Math.min(newRight, window.innerWidth - btnSize - padding))
+      newBottom = Math.max(padding, Math.min(newBottom, window.innerHeight - btnSize - padding))
+      
+      btn.style.setProperty('right', `${newRight}px`, 'important')
+      btn.style.setProperty('bottom', `${newBottom}px`, 'important')
+    }
+  })
+
+  window.addEventListener('mouseup', () => {
+    if (!isDragging) return
+    isDragging = false
+    
+    // Restore styles
+    btn.style.setProperty('cursor', 'pointer', 'important')
+    btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s', 'important')
+    
+    if (hasMoved) {
+      // Save new position
+      const rect = btn.getBoundingClientRect()
+      chrome.storage.local.set({
+        stylesnap_btn_pos: {
+          right: window.innerWidth - rect.right,
+          bottom: window.innerHeight - rect.bottom
+        }
+      })
+    }
+  })
+
+  // ─── Click & Context Menu Logic ───
   btn.addEventListener('click', (e) => {
     e.preventDefault()
     e.stopPropagation()
+    
+    // If it was a drag, don't trigger click action
+    if (hasMoved) return
     
     // Toggle inspector
     if (isActive) {
@@ -520,9 +609,18 @@ function initFloatingButton() {
     } else {
       enableInspector()
       chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
-      // Try to open side panel
-      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {})
     }
+  })
+
+  // Right click to open side panel
+  btn.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // If it was a drag, don't trigger
+    if (hasMoved) return
+    
+    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {})
   })
 
   document.body.appendChild(btn)
