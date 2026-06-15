@@ -502,134 +502,143 @@ function injectFloatingBtnStyles() {
 }
 
 function initFloatingButton() {
-  if (document.getElementById(FLOATING_BTN_ID)) return
-
-  injectFloatingBtnStyles()
-
-  const btn = document.createElement('button')
-  btn.id = FLOATING_BTN_ID
-  btn.setAttribute('data-stylesnap', 'true')
-  btn.title = 'StyleSnap\nLeft Click: Toggle Inspect\nRight Click: Open Panel\nDrag: Move Button' // 鼠标悬停提示
-  
-  btn.innerHTML = `
-    <div id="stylesnap-floating-btn-inner">
-      <div class="stylesnap-logo-icon">S</div>
-    </div>
-  `
-
-  // ─── Drag and Drop Logic ───
-  let isDragging = false
-  let hasMoved = false
-  let startX = 0
-  let startY = 0
-  let initialRight = 24
-  let initialBottom = 24
-
-  // Load saved position
-  chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
-    if (res.stylesnap_btn_pos) {
-      btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
-      btn.style.setProperty('bottom', `${res.stylesnap_btn_pos.bottom}px`, 'important')
+  chrome.storage.local.get(['stylesnap_settings'], (res) => {
+    const s = res.stylesnap_settings || {}
+    if (s.showFloatingBtn === false) {
+      const existing = document.getElementById(FLOATING_BTN_ID)
+      if (existing) existing.remove()
+      return
     }
-  })
 
-  btn.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return // Only left click
-    isDragging = true
-    hasMoved = false
-    startX = e.clientX
-    startY = e.clientY
-    
-    // Get current computed style
-    const rect = btn.getBoundingClientRect()
-    initialRight = window.innerWidth - rect.right
-    initialBottom = window.innerHeight - rect.bottom
-    
-    // Add grabbing style
-    btn.classList.add('is-dragging')
-    btn.style.setProperty('cursor', 'grabbing', 'important')
-    btn.style.setProperty('transition', 'none', 'important') // Disable transition during drag
-    
-    e.preventDefault() // Prevent text selection
-  })
+    if (document.getElementById(FLOATING_BTN_ID)) return
 
-  window.addEventListener('mousemove', (e) => {
-    if (!isDragging) return
+    injectFloatingBtnStyles()
+
+    const btn = document.createElement('button')
+    btn.id = FLOATING_BTN_ID
+    btn.setAttribute('data-stylesnap', 'true')
+    btn.title = 'StyleSnap\nLeft Click: Toggle Inspect\nRight Click: Open Panel\nDrag: Move Button' // 鼠标悬停提示
     
-    const dx = e.clientX - startX
-    const dy = e.clientY - startY
-    
-    // Consider it a drag only if moved more than 3px
-    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-      hasMoved = true
-    }
-    
-    if (hasMoved) {
-      let newRight = initialRight - dx
-      let newBottom = initialBottom - dy
+    btn.innerHTML = `
+      <div id="stylesnap-floating-btn-inner">
+        <div class="stylesnap-logo-icon">S</div>
+      </div>
+    `
+
+    // ─── Drag and Drop Logic ───
+    let isDragging = false
+    let hasMoved = false
+    let startX = 0
+    let startY = 0
+    let initialRight = 24
+    let initialBottom = 24
+
+    // Load saved position
+    chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
+      if (res.stylesnap_btn_pos) {
+        btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
+        btn.style.setProperty('bottom', `${res.stylesnap_btn_pos.bottom}px`, 'important')
+      }
+    })
+
+    btn.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return // Only left click
+      isDragging = true
+      hasMoved = false
+      startX = e.clientX
+      startY = e.clientY
       
-      // Boundaries
-      const padding = 10
-      const btnSize = 40
-      newRight = Math.max(padding, Math.min(newRight, window.innerWidth - btnSize - padding))
-      newBottom = Math.max(padding, Math.min(newBottom, window.innerHeight - btnSize - padding))
-      
-      btn.style.setProperty('right', `${newRight}px`, 'important')
-      btn.style.setProperty('bottom', `${newBottom}px`, 'important')
-    }
-  })
-
-  window.addEventListener('mouseup', () => {
-    if (!isDragging) return
-    isDragging = false
-    
-    // Restore styles
-    btn.classList.remove('is-dragging')
-    btn.style.setProperty('cursor', 'pointer', 'important')
-    btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
-    
-    if (hasMoved) {
-      // Save new position
+      // Get current computed style
       const rect = btn.getBoundingClientRect()
-      chrome.storage.local.set({
-        stylesnap_btn_pos: {
-          right: window.innerWidth - rect.right,
-          bottom: window.innerHeight - rect.bottom
-        }
-      })
-    }
-  })
+      initialRight = window.innerWidth - rect.right
+      initialBottom = window.innerHeight - rect.bottom
+      
+      // Add grabbing style
+      btn.classList.add('is-dragging')
+      btn.style.setProperty('cursor', 'grabbing', 'important')
+      btn.style.setProperty('transition', 'none', 'important') // Disable transition during drag
+      
+      e.preventDefault() // Prevent text selection
+    })
 
-  // ─── Click & Context Menu Logic ───
-  btn.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    
-    // If it was a drag, don't trigger click action
-    if (hasMoved) return
-    
-    // Toggle inspector
-    if (isActive) {
-      disableInspector()
-      chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
-    } else {
-      enableInspector()
-      chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
-    }
-  })
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return
+      
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      
+      // Consider it a drag only if moved more than 3px
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        hasMoved = true
+      }
+      
+      if (hasMoved) {
+        let newRight = initialRight - dx
+        let newBottom = initialBottom - dy
+        
+        // Boundaries
+        const padding = 10
+        const btnSize = 40
+        newRight = Math.max(padding, Math.min(newRight, window.innerWidth - btnSize - padding))
+        newBottom = Math.max(padding, Math.min(newBottom, window.innerHeight - btnSize - padding))
+        
+        btn.style.setProperty('right', `${newRight}px`, 'important')
+        btn.style.setProperty('bottom', `${newBottom}px`, 'important')
+      }
+    })
 
-  // Right click to open side panel
-  btn.addEventListener('contextmenu', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    
-    // If it was a drag, don't trigger
-    if (hasMoved) return
-    
-    chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {})
-  })
+    window.addEventListener('mouseup', () => {
+      if (!isDragging) return
+      isDragging = false
+      
+      // Restore styles
+      btn.classList.remove('is-dragging')
+      btn.style.setProperty('cursor', 'pointer', 'important')
+      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
+      
+      if (hasMoved) {
+        // Save new position
+        const rect = btn.getBoundingClientRect()
+        chrome.storage.local.set({
+          stylesnap_btn_pos: {
+            right: window.innerWidth - rect.right,
+            bottom: window.innerHeight - rect.bottom
+          }
+        })
+      }
+    })
 
-  document.body.appendChild(btn)
+    // ─── Click & Context Menu Logic ───
+    btn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      
+      // If it was a drag, don't trigger click action
+      if (hasMoved) return
+      
+      // Toggle inspector
+      if (isActive) {
+        disableInspector()
+        chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
+      } else {
+        enableInspector()
+        chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
+      }
+    })
+
+    // Right click to open side panel
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      
+      // If it was a drag, don't trigger
+      if (hasMoved) return
+      
+      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {})
+    })
+
+    document.body.appendChild(btn)
+  })
 }
 
 // Initialize on load
@@ -654,9 +663,21 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     
     if (changes.stylesnap_settings) {
       const newSettings = changes.stylesnap_settings.newValue
-      if (newSettings && newSettings.assistMode !== undefined) {
-        assistMode = newSettings.assistMode
-        updateAssistModeUI()
+      if (newSettings) {
+        if (newSettings.assistMode !== undefined) {
+          assistMode = newSettings.assistMode
+          updateAssistModeUI()
+        }
+        
+        // Handle floating button visibility toggle
+        if (newSettings.showFloatingBtn !== undefined) {
+          const btn = document.getElementById(FLOATING_BTN_ID)
+          if (newSettings.showFloatingBtn) {
+            if (!btn) initFloatingButton()
+          } else {
+            if (btn) btn.remove()
+          }
+        }
       }
     }
   }

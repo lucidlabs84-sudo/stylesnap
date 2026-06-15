@@ -333,6 +333,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onLicense
                   onChange={() => handleToggle('showOverlay')}
                 />
                 <Toggle
+                  label="Show Floating Button"
+                  value={settings.showFloatingBtn ?? true}
+                  onChange={() => handleToggle('showFloatingBtn')}
+                />
+                <Toggle
                   label={t('autoInspect')}
                   value={settings.autoInspect}
                   onChange={() => handleToggle('autoInspect')}

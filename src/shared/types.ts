@@ -118,19 +118,20 @@ export interface UserSettings {
   theme:       'light' | 'dark' | 'system'
   defaultTab:  'inspect' | 'export' | 'tokens'
   showOverlay: boolean
+  showFloatingBtn?: boolean
   autoInspect: boolean
   copySound:   boolean
-  aiApiKey:    string
   assistMode:  0 | 1 | 2  // 0: Off, 1: Guidelines, 2: Grid
+  aiApiKey?:   string
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
-  theme:       'dark',
+  theme:       'system',
   defaultTab:  'inspect',
   showOverlay: true,
+  showFloatingBtn: true,
   autoInspect: false,
-  copySound:   false,
-  aiApiKey:    '',
+  copySound:   true,
   assistMode:  1,
 }
 
