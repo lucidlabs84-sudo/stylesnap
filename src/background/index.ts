@@ -53,12 +53,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const err = chrome.runtime.lastError;
         if (err) { /* ignore */ }
         
-        if (response?.ok) {
+        if (response && response.ok) {
           // Side panel is open, close it by disabling and re-enabling
           chrome.sidePanel.setOptions({ tabId, enabled: false }).then(() => {
             setTimeout(() => {
               chrome.sidePanel.setOptions({ tabId, enabled: true }).catch(console.error)
-            }, 100)
+            }, 200)
           }).catch(console.error)
         } else {
           // Side panel is closed, open it
@@ -67,7 +67,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
     }
     sendResponse({ ok: true })
-    return false
+    return true // Keep channel open for async ping response handling
   }
 
   // Inject/enable inspector, or edit CSS on current tab
