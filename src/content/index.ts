@@ -412,7 +412,7 @@ function injectFloatingBtnStyles() {
       position: fixed !important;
       bottom: 24px !important;
       right: 24px !important;
-      padding: 2px !important;
+      padding: 0 !important;
       border-radius: 24px !important;
       cursor: pointer !important;
       z-index: 2147483647 !important;
@@ -420,41 +420,19 @@ function injectFloatingBtnStyles() {
       user-select: none !important;
       border: none !important;
       outline: none !important;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
-      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
-      overflow: hidden !important;
-      display: block !important;
+      background: transparent !important;
+      overflow: visible !important;
+      display: flex !important;
+      align-items: center !important;
       box-sizing: border-box !important;
-      width: auto !important;
-      height: auto !important;
+      width: 40px !important;
+      height: 40px !important;
       opacity: 0.4 !important; /* 默认半透明以防遮挡 */
     }
     #stylesnap-floating-btn:hover,
     #stylesnap-floating-btn.is-active,
     #stylesnap-floating-btn.is-dragging {
-      transform: scale(1.05) translateY(-2px) !important;
-      filter: brightness(1.1) !important;
       opacity: 1 !important; /* 交互时恢复不透明 */
-    }
-    #stylesnap-floating-btn::before {
-      content: '' !important;
-      position: absolute !important;
-      top: 50% !important;
-      left: 50% !important;
-      width: 300% !important;
-      height: 300% !important;
-      background: conic-gradient(transparent, #6ee7b7, transparent 30%) !important;
-      transform-origin: center center !important;
-      animation: stylesnap-btn-rotate 2s linear infinite !important;
-      display: none !important;
-      pointer-events: none !important;
-    }
-    #stylesnap-floating-btn.is-active {
-      background: #064e3b !important;
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
-    }
-    #stylesnap-floating-btn.is-active::before {
-      display: block !important;
     }
     #stylesnap-floating-btn-inner {
       position: relative !important;
@@ -465,12 +443,84 @@ function injectFloatingBtnStyles() {
       height: 40px !important;
       background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
       border-radius: 50% !important;
-      z-index: 1 !important;
+      z-index: 2 !important;
       box-sizing: border-box !important;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s !important;
+    }
+    #stylesnap-floating-btn:hover #stylesnap-floating-btn-inner,
+    #stylesnap-floating-btn.is-dragging #stylesnap-floating-btn-inner {
+      transform: scale(1.05) translateY(-2px) !important;
     }
     #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
       background: linear-gradient(135deg, #10b981, #059669) !important;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
     }
+    #stylesnap-floating-btn::before {
+      content: '' !important;
+      position: absolute !important;
+      top: 50% !important;
+      left: 50% !important;
+      width: 140% !important;
+      height: 140% !important;
+      background: conic-gradient(transparent, #6ee7b7, transparent 30%) !important;
+      transform-origin: center center !important;
+      animation: stylesnap-btn-rotate 2s linear infinite !important;
+      display: none !important;
+      pointer-events: none !important;
+      z-index: 1 !important;
+    }
+    #stylesnap-floating-btn.is-active::before {
+      display: block !important;
+    }
+    /* 悬浮面板 */
+    #stylesnap-floating-panel {
+      position: absolute !important;
+      right: 48px !important; /* 在按钮左侧展开 */
+      top: 50% !important;
+      transform: translateY(-50%) scale(0.9) !important;
+      transform-origin: right center !important;
+      background: #1e293b !important;
+      border: 1px solid rgba(255,255,255,0.1) !important;
+      border-radius: 12px !important;
+      padding: 6px !important;
+      display: flex !important;
+      gap: 4px !important;
+      opacity: 0 !important;
+      visibility: hidden !important;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+      z-index: 1 !important;
+      pointer-events: none !important;
+    }
+    #stylesnap-floating-btn:hover #stylesnap-floating-panel {
+      opacity: 1 !important;
+      visibility: visible !important;
+      transform: translateY(-50%) scale(1) !important;
+      pointer-events: auto !important;
+    }
+    .stylesnap-panel-item {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 32px !important;
+      height: 32px !important;
+      border-radius: 8px !important;
+      background: transparent !important;
+      color: #94a3b8 !important;
+      border: none !important;
+      cursor: pointer !important;
+      transition: all 0.15s !important;
+    }
+    .stylesnap-panel-item:hover {
+      background: rgba(255,255,255,0.1) !important;
+      color: #fff !important;
+    }
+    .stylesnap-panel-item svg {
+      width: 16px !important;
+      height: 16px !important;
+    }
+    
     @keyframes stylesnap-btn-rotate {
       0% { transform: translate(-50%, -50%) rotate(0deg); }
       100% { transform: translate(-50%, -50%) rotate(360deg); }
@@ -522,6 +572,18 @@ function initFloatingButton() {
     btn.innerHTML = `
       <div id="stylesnap-floating-btn-inner">
         <div class="stylesnap-logo-icon">S</div>
+      </div>
+      <div id="stylesnap-floating-panel">
+        <button class="stylesnap-panel-item" id="stylesnap-action-inspect" title="Inspect Element">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3h18v18H3zM12 8v8M8 12h8"/>
+          </svg>
+        </button>
+        <button class="stylesnap-panel-item" id="stylesnap-action-panel" title="Open Side Panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/>
+          </svg>
+        </button>
       </div>
     `
 
@@ -609,14 +671,17 @@ function initFloatingButton() {
     })
 
     // ─── Click & Context Menu Logic ───
-    btn.addEventListener('click', (e) => {
+    const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
+    const actionInspect = btn.querySelector('#stylesnap-action-inspect')
+    const actionPanel = btn.querySelector('#stylesnap-action-panel')
+
+    btnInner?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       
-      // If it was a drag, don't trigger click action
       if (hasMoved) return
       
-      // Toggle inspector
+      // Default action: toggle inspector
       if (isActive) {
         disableInspector()
         chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
@@ -626,14 +691,21 @@ function initFloatingButton() {
       }
     })
 
-    // Right click to open side panel
-    btn.addEventListener('contextmenu', (e) => {
+    actionInspect?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      
-      // If it was a drag, don't trigger
-      if (hasMoved) return
-      
+      if (isActive) {
+        disableInspector()
+        chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
+      } else {
+        enableInspector()
+        chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
+      }
+    })
+
+    actionPanel?.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
       chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {})
     })
 
