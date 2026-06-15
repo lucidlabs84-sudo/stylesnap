@@ -413,7 +413,7 @@ function injectFloatingBtnStyles() {
       bottom: 24px !important;
       right: 24px !important;
       padding: 0 !important;
-      border-radius: 24px !important;
+      border-radius: 50% !important; /* 关键修复：确保容器本身是正圆形，裁剪超出部分的流光 */
       cursor: pointer !important;
       z-index: 2147483647 !important;
       transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease !important;
@@ -456,7 +456,20 @@ function injectFloatingBtnStyles() {
       background: linear-gradient(135deg, #10b981, #059669) !important;
       box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
     }
-    #stylesnap-floating-btn::before {
+    /* 流光外壳包裹层，用于裁剪溢出 */
+    #stylesnap-floating-btn-ring {
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      border-radius: 50% !important;
+      overflow: hidden !important;
+      z-index: 1 !important;
+      pointer-events: none !important;
+    }
+
+    #stylesnap-floating-btn-ring::before {
       content: '' !important;
       position: absolute !important;
       top: 50% !important;
@@ -467,10 +480,8 @@ function injectFloatingBtnStyles() {
       transform-origin: center center !important;
       animation: stylesnap-btn-rotate 2s linear infinite !important;
       display: none !important;
-      pointer-events: none !important;
-      z-index: 1 !important;
     }
-    #stylesnap-floating-btn.is-active::before {
+    #stylesnap-floating-btn.is-active #stylesnap-floating-btn-ring::before {
       display: block !important;
     }
     /* 悬浮面板 */
@@ -493,7 +504,23 @@ function injectFloatingBtnStyles() {
       z-index: 1 !important;
       pointer-events: none !important;
     }
-    #stylesnap-floating-btn:hover #stylesnap-floating-panel {
+    
+    /* 
+      关键修复：增加一个不可见的“桥梁”区域 
+      防止鼠标从按钮移动到面板时，因为存在缝隙导致 hover 状态丢失 
+    */
+    #stylesnap-floating-panel::after {
+      content: '' !important;
+      position: absolute !important;
+      right: -10px !important; /* 填补 right: 48px 产生的空隙 */
+      top: 0 !important;
+      bottom: 0 !important;
+      width: 20px !important;
+      background: transparent !important;
+    }
+
+    #stylesnap-floating-btn:hover #stylesnap-floating-panel,
+    #stylesnap-floating-panel:hover {
       opacity: 1 !important;
       visibility: visible !important;
       transform: translateY(-50%) scale(1) !important;
@@ -570,6 +597,7 @@ function initFloatingButton() {
     btn.title = 'StyleSnap\nLeft Click: Toggle Inspect\nRight Click: Open Panel\nDrag: Move Button' // 鼠标悬停提示
     
     btn.innerHTML = `
+      <div id="stylesnap-floating-btn-ring"></div>
       <div id="stylesnap-floating-btn-inner">
         <div class="stylesnap-logo-icon">S</div>
       </div>
