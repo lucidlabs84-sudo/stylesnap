@@ -378,17 +378,6 @@ function enableInspector() {
   const btn = document.getElementById(FLOATING_BTN_ID)
   if (btn) {
     btn.classList.add('is-active')
-    chrome.storage.local.get(['language'], (res) => {
-      const isEn = res.language === 'en'
-      const stopText = isEn ? 'Stop Inspecting' : '停止审查'
-      
-      btn.innerHTML = `
-        <div id="stylesnap-floating-btn-inner">
-          <div class="stylesnap-logo-icon">S</div>
-          <span>${stopText}</span>
-        </div>
-      `
-    })
   }
 }
 
@@ -407,17 +396,6 @@ function disableInspector() {
   const btn = document.getElementById(FLOATING_BTN_ID)
   if (btn) {
     btn.classList.remove('is-active')
-    chrome.storage.local.get(['language'], (res) => {
-      const isEn = res.language === 'en'
-      const startText = isEn ? 'Inspect Style' : '审查样式'
-      
-      btn.innerHTML = `
-        <div id="stylesnap-floating-btn-inner">
-          <div class="stylesnap-logo-icon">S</div>
-          <span>${startText}</span>
-        </div>
-      `
-    })
   }
 }
 
@@ -478,19 +456,13 @@ function injectFloatingBtnStyles() {
       position: relative !important;
       display: flex !important;
       align-items: center !important;
-      gap: 8px !important;
+      justify-content: center !important;
+      width: 40px !important;
       height: 40px !important;
-      padding: 0 16px 0 12px !important;
       background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
-      border-radius: 22px !important;
+      border-radius: 50% !important;
       z-index: 1 !important;
-      color: #fff !important;
-      font-family: system-ui, -apple-system, sans-serif !important;
-      font-size: 14px !important;
-      font-weight: 600 !important;
-      letter-spacing: 0.3px !important;
       box-sizing: border-box !important;
-      line-height: 1 !important;
     }
     #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
       background: linear-gradient(135deg, #10b981, #059669) !important;
@@ -500,15 +472,15 @@ function injectFloatingBtnStyles() {
       100% { transform: translate(-50%, -50%) rotate(360deg); }
     }
     .stylesnap-logo-icon {
-      width: 20px !important;
-      height: 20px !important;
+      width: 24px !important;
+      height: 24px !important;
       background: #fff !important;
       color: #6366f1 !important;
-      border-radius: 6px !important;
+      border-radius: 8px !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      font-size: 14px !important;
+      font-size: 16px !important;
       font-weight: 900 !important;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
       font-family: ui-sans-serif, system-ui, sans-serif !important;
@@ -529,19 +501,13 @@ function initFloatingButton() {
   const btn = document.createElement('button')
   btn.id = FLOATING_BTN_ID
   btn.setAttribute('data-stylesnap', 'true')
+  btn.title = 'StyleSnap' // 鼠标悬停提示
   
-  // Try to load user's preferred language for the floating button
-  chrome.storage.local.get(['language'], (res) => {
-    const isEn = res.language === 'en'
-    const startText = isEn ? 'Inspect Style' : '审查样式'
-    
-    btn.innerHTML = `
-      <div id="stylesnap-floating-btn-inner">
-        <div class="stylesnap-logo-icon">S</div>
-        <span>${startText}</span>
-      </div>
-    `
-  })
+  btn.innerHTML = `
+    <div id="stylesnap-floating-btn-inner">
+      <div class="stylesnap-logo-icon">S</div>
+    </div>
+  `
 
   btn.addEventListener('click', (e) => {
     e.preventDefault()
@@ -575,12 +541,6 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
     if (changes.language) {
       const lang = changes.language.newValue
-      // Update floating button text
-      if (isActive) {
-        enableInspector() // Re-apply active state UI
-      } else {
-        disableInspector() // Re-apply inactive state UI
-      }
       // Update overlay language
       const overlay = document.getElementById(OVERLAY_ID)
       if (overlay) {
