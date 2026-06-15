@@ -377,17 +377,14 @@ function enableInspector() {
 
   const btn = document.getElementById(FLOATING_BTN_ID)
   if (btn) {
+    btn.classList.add('is-active')
     chrome.storage.local.get(['language'], (res) => {
       const isEn = res.language === 'en'
       const stopText = isEn ? 'Stop Inspecting' : '停止审查'
       
-      btn.style.background = 'linear-gradient(135deg, #10b981, #059669)'
-      btn.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.4)'
       btn.innerHTML = `
-        <div style="display:flex; align-items:center; gap:6px; font-family:system-ui, sans-serif; font-size:14px; font-weight:600;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-          </svg>
+        <div id="stylesnap-floating-btn-inner">
+          <div class="stylesnap-logo-icon">S</div>
           <span>${stopText}</span>
         </div>
       `
@@ -409,18 +406,14 @@ function disableInspector() {
 
   const btn = document.getElementById(FLOATING_BTN_ID)
   if (btn) {
+    btn.classList.remove('is-active')
     chrome.storage.local.get(['language'], (res) => {
       const isEn = res.language === 'en'
       const startText = isEn ? 'Inspect Style' : '审查样式'
       
-      btn.style.background = 'linear-gradient(135deg, #6366f1, #8b5cf6)'
-      btn.style.boxShadow = '0 4px 12px rgba(99, 102, 241, 0.4)'
       btn.innerHTML = `
-        <div style="display:flex; align-items:center; gap:6px; font-family:system-ui, sans-serif; font-size:14px; font-weight:600;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="m21 21-4.35-4.35" />
-            <circle cx="11" cy="11" r="8" />
-          </svg>
+        <div id="stylesnap-floating-btn-inner">
+          <div class="stylesnap-logo-icon">S</div>
           <span>${startText}</span>
         </div>
       `
@@ -432,8 +425,106 @@ function disableInspector() {
 
 const FLOATING_BTN_ID = 'stylesnap-floating-btn'
 
+function injectFloatingBtnStyles() {
+  if (document.getElementById('stylesnap-btn-style')) return
+  const style = document.createElement('style')
+  style.id = 'stylesnap-btn-style'
+  style.textContent = `
+    #stylesnap-floating-btn {
+      position: fixed !important;
+      bottom: 24px !important;
+      right: 24px !important;
+      padding: 2px !important;
+      border-radius: 24px !important;
+      cursor: pointer !important;
+      z-index: 2147483647 !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s !important;
+      user-select: none !important;
+      border: none !important;
+      outline: none !important;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
+      overflow: hidden !important;
+      display: block !important;
+      box-sizing: border-box !important;
+      width: auto !important;
+      height: auto !important;
+    }
+    #stylesnap-floating-btn:hover {
+      transform: scale(1.05) translateY(-2px) !important;
+      filter: brightness(1.1) !important;
+    }
+    #stylesnap-floating-btn::before {
+      content: '' !important;
+      position: absolute !important;
+      top: 50% !important;
+      left: 50% !important;
+      width: 300% !important;
+      height: 300% !important;
+      background: conic-gradient(transparent, #6ee7b7, transparent 30%) !important;
+      transform-origin: center center !important;
+      animation: stylesnap-btn-rotate 2s linear infinite !important;
+      display: none !important;
+      pointer-events: none !important;
+    }
+    #stylesnap-floating-btn.is-active {
+      background: #064e3b !important;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
+    }
+    #stylesnap-floating-btn.is-active::before {
+      display: block !important;
+    }
+    #stylesnap-floating-btn-inner {
+      position: relative !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      height: 40px !important;
+      padding: 0 16px 0 12px !important;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+      border-radius: 22px !important;
+      z-index: 1 !important;
+      color: #fff !important;
+      font-family: system-ui, -apple-system, sans-serif !important;
+      font-size: 14px !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.3px !important;
+      box-sizing: border-box !important;
+      line-height: 1 !important;
+    }
+    #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
+      background: linear-gradient(135deg, #10b981, #059669) !important;
+    }
+    @keyframes stylesnap-btn-rotate {
+      0% { transform: translate(-50%, -50%) rotate(0deg); }
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+    .stylesnap-logo-icon {
+      width: 20px !important;
+      height: 20px !important;
+      background: #fff !important;
+      color: #6366f1 !important;
+      border-radius: 6px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-size: 14px !important;
+      font-weight: 900 !important;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+      font-family: ui-sans-serif, system-ui, sans-serif !important;
+      box-sizing: border-box !important;
+    }
+    #stylesnap-floating-btn.is-active .stylesnap-logo-icon {
+      color: #10b981 !important;
+    }
+  `
+  document.head.appendChild(style)
+}
+
 function initFloatingButton() {
   if (document.getElementById(FLOATING_BTN_ID)) return
+
+  injectFloatingBtnStyles()
 
   const btn = document.createElement('button')
   btn.id = FLOATING_BTN_ID
@@ -445,45 +536,11 @@ function initFloatingButton() {
     const startText = isEn ? 'Inspect Style' : '审查样式'
     
     btn.innerHTML = `
-      <div style="display:flex; align-items:center; gap:6px; font-family:system-ui, sans-serif; font-size:14px; font-weight:600;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="m21 21-4.35-4.35" />
-          <circle cx="11" cy="11" r="8" />
-        </svg>
+      <div id="stylesnap-floating-btn-inner">
+        <div class="stylesnap-logo-icon">S</div>
         <span>${startText}</span>
       </div>
     `
-  })
-  
-  // Style the button directly to ensure it works regardless of external CSS
-  Object.assign(btn.style, {
-    position: 'fixed',
-    bottom: '24px',
-    right: '24px',
-    width: 'auto',
-    padding: '0 16px',
-    height: '44px',
-    borderRadius: '22px',
-    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    color: '#ffffff',
-    border: '1px solid rgba(255,255,255,0.1)',
-    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.4)',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: '2147483647',
-    transition: 'transform 0.2s, filter 0.2s',
-    userSelect: 'none'
-  })
-
-  btn.addEventListener('mouseenter', () => {
-    btn.style.transform = 'scale(1.05) translateY(-2px)'
-    btn.style.filter = 'brightness(1.1)'
-  })
-  btn.addEventListener('mouseleave', () => {
-    btn.style.transform = 'scale(1) translateY(0)'
-    btn.style.filter = 'brightness(1)'
   })
 
   btn.addEventListener('click', (e) => {
