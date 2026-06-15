@@ -43,12 +43,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true // Keep channel open for async response
   }
 
-  // Open side panel from content script
-  if (message.type === 'OPEN_SIDE_PANEL') {
+  // Toggle side panel from content script
+  if (message.type === 'TOGGLE_SIDE_PANEL') {
     const tabId = sender.tab?.id
     const windowId = sender.tab?.windowId
     if (tabId && windowId) {
-      chrome.sidePanel.open({ windowId }).catch(console.error)
+      chrome.runtime.sendMessage({ type: 'PING_SIDE_PANEL' }, (response) => {
+        // Clear lastError
+        const err = chrome.runtime.lastError;
+        if (err) { /* ignore */ }
+        
+        if (response?.ok) {
+          // Side panel is open, close it by disabling and re-enabling
+          chrome.sidePanel.setOptions({ tabId, enabled: false }).then(() => {
+            setTimeout(() => {
+              chrome.sidePanel.setOptions({ tabId, enabled: true }).catch(console.error)
+            }, 100)
+          }).catch(console.error)
+        } else {
+          // Side panel is closed, open it
+          chrome.sidePanel.open({ windowId }).catch(console.error)
+        }
+      })
     }
     sendResponse({ ok: true })
     return false

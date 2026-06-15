@@ -70,7 +70,12 @@ function AppContent() {
 
   // ── Listen for messages from content script ──────────────────────────────
   useEffect(() => {
-    const handler = (msg: { type: string; payload?: unknown }) => {
+    const handler = (msg: { type: string; payload?: unknown }, _sender: any, sendResponse: any) => {
+      if (msg.type === 'PING_SIDE_PANEL') {
+        sendResponse({ ok: true })
+        return false
+      }
+
       switch (msg.type) {
         case 'ELEMENT_HOVERED':
           setHoveredEl(msg.payload as HoveredPayload)

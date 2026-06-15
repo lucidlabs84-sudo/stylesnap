@@ -504,6 +504,7 @@ function injectFloatingBtnStyles() {
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
       z-index: 1 !important;
       pointer-events: none !important;
+      white-space: nowrap !important;
     }
     
     /* 
@@ -612,6 +613,13 @@ async function initFloatingButton() {
             <path d="M3 3h18v18H3zM12 8v8M8 12h8"/>
           </svg>
         </button>
+        <button class="stylesnap-panel-item" id="stylesnap-action-assist" title="${t.btnAssist}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            <path d="M3 9h18"/>
+            <path d="M9 21V9"/>
+          </svg>
+        </button>
         <button class="stylesnap-panel-item" id="stylesnap-action-panel" title="${t.btnPanel}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/>
@@ -706,6 +714,7 @@ async function initFloatingButton() {
     // ─── Click & Context Menu Logic ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
     const actionInspect = btn.querySelector('#stylesnap-action-inspect')
+    const actionAssist = btn.querySelector('#stylesnap-action-assist')
     const actionPanel = btn.querySelector('#stylesnap-action-panel')
 
     btnInner?.addEventListener('click', (e) => {
@@ -736,10 +745,25 @@ async function initFloatingButton() {
       }
     })
 
+    actionAssist?.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      
+      assistMode = (assistMode + 1) % 3
+      updateAssistModeUI()
+      
+      // Save to storage
+      chrome.storage.local.get(['stylesnap_settings'], (res) => {
+        const settings = res.stylesnap_settings || {}
+        settings.assistMode = assistMode
+        chrome.storage.local.set({ stylesnap_settings: settings })
+      })
+    })
+
     actionPanel?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {})
+      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }).catch(() => {})
     })
 
     document.body.appendChild(btn)

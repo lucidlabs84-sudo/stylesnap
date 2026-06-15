@@ -161,7 +161,8 @@ export const translations = {
     // Floating Button Tooltips
     btnTooltip: 'StyleSnap\nClick: Toggle Inspect\nDrag: Move Button',
     btnInspect: 'Inspect Element',
-    btnPanel: 'Open Side Panel',
+    btnPanel: 'Toggle Side Panel',
+    btnAssist: 'Toggle Assist Mode',
     // Assist Mode
     assistModeLabel: 'Assist Mode',
     assistOff: 'Off',
@@ -298,7 +299,8 @@ export const translations = {
     // Floating Button Tooltips
     btnTooltip: 'StyleSnap\n点击：开关审查\n拖拽：移动位置',
     btnInspect: '审查元素',
-    btnPanel: '打开侧边栏',
+    btnPanel: '开关侧边栏',
+    btnAssist: '切换辅助线模式',
     // Assist Mode
     assistModeLabel: '辅助线模式',
     assistOff: '关闭',
