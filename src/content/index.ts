@@ -26,6 +26,21 @@ function updateAssistModeUI() {
   } else if (assistMode === 2) {
     document.body.classList.add('stylesnap-mode-grid')
   }
+
+  // Update floating panel button state
+  const assistBtn = document.getElementById('stylesnap-action-assist')
+  if (assistBtn) {
+    if (assistMode === 0) {
+      assistBtn.classList.remove('is-active')
+      assistBtn.setAttribute('data-mode', 'OFF')
+    } else if (assistMode === 1) {
+      assistBtn.classList.add('is-active')
+      assistBtn.setAttribute('data-mode', 'L') // L for Line/Guidelines
+    } else if (assistMode === 2) {
+      assistBtn.classList.add('is-active')
+      assistBtn.setAttribute('data-mode', 'G') // G for Grid
+    }
+  }
 }
 
 function initGuides() {
@@ -380,6 +395,8 @@ function enableInspector() {
   const btn = document.getElementById(FLOATING_BTN_ID)
   if (btn) {
     btn.classList.add('is-active')
+    const inspectBtn = document.getElementById('stylesnap-action-inspect')
+    if (inspectBtn) inspectBtn.classList.add('is-active')
   }
 }
 
@@ -398,6 +415,8 @@ function disableInspector() {
   const btn = document.getElementById(FLOATING_BTN_ID)
   if (btn) {
     btn.classList.remove('is-active')
+    const inspectBtn = document.getElementById('stylesnap-action-inspect')
+    if (inspectBtn) inspectBtn.classList.remove('is-active')
   }
 }
 
@@ -490,14 +509,15 @@ function injectFloatingBtnStyles() {
     #stylesnap-floating-panel {
       position: absolute !important;
       right: 48px !important; /* 在按钮左侧展开 */
-      top: 50% !important;
-      transform: translateY(-50%) scale(0.9) !important;
-      transform-origin: right center !important;
+      bottom: 0 !important; /* 从底部对齐开始向上展开 */
+      transform: scale(0.9) !important;
+      transform-origin: right bottom !important; /* 动画原点改为右下角 */
       background: #1e293b !important;
       border: 1px solid rgba(255,255,255,0.1) !important;
       border-radius: 12px !important;
       padding: 6px !important;
       display: flex !important;
+      flex-direction: column !important; /* 垂直排列 */
       gap: 4px !important;
       opacity: 0 !important;
       visibility: hidden !important;
@@ -516,8 +536,8 @@ function injectFloatingBtnStyles() {
       content: '' !important;
       position: absolute !important;
       right: -10px !important; /* 填补 right: 48px 产生的空隙 */
-      top: 0 !important;
-      bottom: 0 !important;
+      bottom: 0 !important; /* 桥梁也靠下对齐 */
+      height: 40px !important; /* 只在主按钮高度范围内搭桥 */
       width: 20px !important;
       background: transparent !important;
     }
@@ -526,7 +546,7 @@ function injectFloatingBtnStyles() {
     #stylesnap-floating-panel:hover {
       opacity: 1 !important;
       visibility: visible !important;
-      transform: translateY(-50%) scale(1) !important;
+      transform: scale(1) !important;
       pointer-events: auto !important;
     }
     .stylesnap-panel-item {
@@ -541,10 +561,34 @@ function injectFloatingBtnStyles() {
       border: none !important;
       cursor: pointer !important;
       transition: all 0.15s !important;
+      position: relative !important;
     }
     .stylesnap-panel-item:hover {
       background: rgba(255,255,255,0.1) !important;
       color: #fff !important;
+    }
+    /* 状态激活时的样式 */
+    .stylesnap-panel-item.is-active {
+      color: #10b981 !important; /* emerald-500 */
+      background: rgba(16, 185, 129, 0.1) !important;
+    }
+    .stylesnap-panel-item.is-active:hover {
+      background: rgba(16, 185, 129, 0.2) !important;
+    }
+    
+    /* 当前辅助线模式角标提示 */
+    #stylesnap-action-assist::after {
+      content: attr(data-mode) !important;
+      position: absolute !important;
+      bottom: 2px !important;
+      right: 2px !important;
+      font-size: 8px !important;
+      font-family: monospace !important;
+      font-weight: bold !important;
+      background: #1e293b !important;
+      padding: 0 2px !important;
+      border-radius: 2px !important;
+      line-height: 1 !important;
     }
     .stylesnap-panel-item svg {
       width: 16px !important;
@@ -609,12 +653,12 @@ async function initFloatingButton() {
         <div class="stylesnap-logo-icon">S</div>
       </div>
       <div id="stylesnap-floating-panel">
-        <button class="stylesnap-panel-item" id="stylesnap-action-inspect" title="${t.btnInspect}">
+        <button class="stylesnap-panel-item ${isActive ? 'is-active' : ''}" id="stylesnap-action-inspect" title="${t.btnInspect}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 3h18v18H3zM12 8v8M8 12h8"/>
           </svg>
         </button>
-        <button class="stylesnap-panel-item" id="stylesnap-action-assist" title="${t.btnAssist}">
+        <button class="stylesnap-panel-item ${assistMode > 0 ? 'is-active' : ''}" id="stylesnap-action-assist" title="${t.btnAssist}" data-mode="${assistMode === 1 ? 'L' : assistMode === 2 ? 'G' : 'OFF'}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
             <path d="M3 9h18"/>
