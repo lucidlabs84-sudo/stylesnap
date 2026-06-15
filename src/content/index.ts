@@ -6,6 +6,7 @@
 import { parseElement, extractComponentCSS, extractComponentHTML } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { collectAnnotatableElements } from '@/lib/annotator'
+import { detectLang, translations } from '@/lib/i18n-core'
 import type { ParsedCSS } from '@/shared/types'
 
 // ─── State ────────────────────────────────────────────────────────────
@@ -578,8 +579,8 @@ function injectFloatingBtnStyles() {
   document.head.appendChild(style)
 }
 
-function initFloatingButton() {
-  chrome.storage.local.get(['stylesnap_settings'], (res) => {
+async function initFloatingButton() {
+  chrome.storage.local.get(['stylesnap_settings'], async (res) => {
     const s = res.stylesnap_settings || {}
     if (s.showFloatingBtn === false) {
       const existing = document.getElementById(FLOATING_BTN_ID)
@@ -589,12 +590,16 @@ function initFloatingButton() {
 
     if (document.getElementById(FLOATING_BTN_ID)) return
 
+    // 获取当前语言并获取翻译
+    const lang = await detectLang()
+    const t = translations[lang] || translations.en
+
     injectFloatingBtnStyles()
 
     const btn = document.createElement('button')
     btn.id = FLOATING_BTN_ID
     btn.setAttribute('data-stylesnap', 'true')
-    btn.title = 'StyleSnap\nLeft Click: Toggle Inspect\nRight Click: Open Panel\nDrag: Move Button' // 鼠标悬停提示
+    btn.title = t.btnTooltip // 国际化的鼠标悬停提示
     
     btn.innerHTML = `
       <div id="stylesnap-floating-btn-ring"></div>
@@ -602,12 +607,12 @@ function initFloatingButton() {
         <div class="stylesnap-logo-icon">S</div>
       </div>
       <div id="stylesnap-floating-panel">
-        <button class="stylesnap-panel-item" id="stylesnap-action-inspect" title="Inspect Element">
+        <button class="stylesnap-panel-item" id="stylesnap-action-inspect" title="${t.btnInspect}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 3h18v18H3zM12 8v8M8 12h8"/>
           </svg>
         </button>
-        <button class="stylesnap-panel-item" id="stylesnap-action-panel" title="Open Side Panel">
+        <button class="stylesnap-panel-item" id="stylesnap-action-panel" title="${t.btnPanel}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/>
           </svg>
