@@ -416,7 +416,7 @@ function injectFloatingBtnStyles() {
       border-radius: 24px !important;
       cursor: pointer !important;
       z-index: 2147483647 !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease !important;
       user-select: none !important;
       border: none !important;
       outline: none !important;
@@ -427,10 +427,14 @@ function injectFloatingBtnStyles() {
       box-sizing: border-box !important;
       width: auto !important;
       height: auto !important;
+      opacity: 0.4 !important; /* 默认半透明以防遮挡 */
     }
-    #stylesnap-floating-btn:hover {
+    #stylesnap-floating-btn:hover,
+    #stylesnap-floating-btn.is-active,
+    #stylesnap-floating-btn.is-dragging {
       transform: scale(1.05) translateY(-2px) !important;
       filter: brightness(1.1) !important;
+      opacity: 1 !important; /* 交互时恢复不透明 */
     }
     #stylesnap-floating-btn::before {
       content: '' !important;
@@ -542,6 +546,7 @@ function initFloatingButton() {
     initialBottom = window.innerHeight - rect.bottom
     
     // Add grabbing style
+    btn.classList.add('is-dragging')
     btn.style.setProperty('cursor', 'grabbing', 'important')
     btn.style.setProperty('transition', 'none', 'important') // Disable transition during drag
     
@@ -579,8 +584,9 @@ function initFloatingButton() {
     isDragging = false
     
     // Restore styles
+    btn.classList.remove('is-dragging')
     btn.style.setProperty('cursor', 'pointer', 'important')
-    btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s', 'important')
+    btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
     
     if (hasMoved) {
       // Save new position
