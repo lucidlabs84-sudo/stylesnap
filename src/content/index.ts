@@ -208,7 +208,8 @@ function onClick(e: MouseEvent) {
   }
 
   // 如果点击了扩展的 UI（例如右下角的悬浮按钮），直接忽略
-  if (el && el.closest('[data-stylesnap]')) {
+  // 必须确保点击悬浮面板的按钮时不会意外触发这里
+  if (el && (el.closest('[data-stylesnap]') || el.closest('#' + FLOATING_BTN_ID))) {
     return
   }
 
@@ -717,13 +718,7 @@ async function initFloatingButton() {
     const actionAssist = btn.querySelector('#stylesnap-action-assist')
     const actionPanel = btn.querySelector('#stylesnap-action-panel')
 
-    btnInner?.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      
-      if (hasMoved) return
-      
-      // Default action: toggle inspector
+    const toggleInspector = () => {
       if (isActive) {
         disableInspector()
         chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
@@ -731,17 +726,28 @@ async function initFloatingButton() {
         enableInspector()
         chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
       }
+    }
+
+    btnInner?.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      
+      if (hasMoved) return
+      
+      // Default action: toggle inspector
+      toggleInspector()
     })
 
     actionInspect?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      if (isActive) {
-        disableInspector()
-        chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
-      } else {
-        enableInspector()
-        chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
+      toggleInspector()
+      
+      // If we just enabled inspector, we probably don't want the menu to stay open
+      // In CSS, hover state handles the menu, but clicking might keep focus on the button.
+      // We can force blur to help reset state if needed
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
       }
     })
 
@@ -751,6 +757,11 @@ async function initFloatingButton() {
       
       assistMode = (assistMode + 1) % 3
       updateAssistModeUI()
+      
+      // If assist mode is turned on (1 or 2), we should probably ensure inspector is active
+      if (assistMode > 0 && !isActive) {
+        toggleInspector()
+      }
       
       // Save to storage
       chrome.storage.local.get(['stylesnap_settings'], (res) => {
