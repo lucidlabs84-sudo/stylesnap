@@ -61,7 +61,7 @@ function updateModeUI() {
   // corner badge on main ball
   const badge = btn.querySelector('.stylesnap-mode-badge') as HTMLElement | null
   if (badge) {
-    badge.textContent = inspectMode > 0 ? MODE_ICON_SVG[inspectMode] : ''
+    badge.innerHTML = inspectMode > 0 ? MODE_ICON_SVG[inspectMode] : ''
     badge.style.background = inspectMode > 0 ? MODE_BADGE_COLOR[inspectMode] : 'transparent'
     badge.style.border = inspectMode === 0 ? '1.5px solid rgba(255,255,255,0.25)' : 'none'
   }
