@@ -21,7 +21,6 @@ import type { ParsedCSS } from '@/shared/types'
 let inspectMode = 0
 let lastHighlighted: Element | null = null
 let lockedElement: Element | null = null
-let isCollapsed = false
 
 // derived helpers
 const isActive = () => inspectMode > 0
@@ -31,9 +30,7 @@ const OVERLAY_ID = 'stylesnap-overlay'
 const HIGHLIGHT_CLASS = 'stylesnap-highlight'
 const LOCKED_CLASS = 'stylesnap-locked'
 
-// ─── Mode badge mapping ────────────────────────────────────────────────
-const MODE_BADGE = ['', 'I', 'L', 'G'] as const
-const MODE_BADGE_COLOR = ['#5F5E5A', '#534AB7', '#0F6E56', '#185FA5'] as const
+// ─── Mode icon mapping ────────────────────────────────────────────────
 const MODE_ICON_SVG = [
   // 0: Off
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
@@ -44,6 +41,8 @@ const MODE_ICON_SVG = [
   // 3: Grid
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`,
 ] as const
+
+const MODE_BADGE_COLOR = ['#5F5E5A', '#534AB7', '#0F6E56', '#185FA5'] as const
 
 function updateModeUI() {
   // body class for overlay modes
@@ -59,21 +58,19 @@ function updateModeUI() {
   if (inspectMode > 0) btn.classList.add('is-active')
   else btn.classList.remove('is-active')
 
-  // corner badge
+  // corner badge on main ball
   const badge = btn.querySelector('.stylesnap-mode-badge') as HTMLElement | null
   if (badge) {
-    badge.textContent = MODE_BADGE[inspectMode]
+    badge.textContent = inspectMode > 0 ? MODE_ICON_SVG[inspectMode] : ''
     badge.style.background = inspectMode > 0 ? MODE_BADGE_COLOR[inspectMode] : 'transparent'
     badge.style.border = inspectMode === 0 ? '1.5px solid rgba(255,255,255,0.25)' : 'none'
   }
 
-  // mode button icon + color
-  const modeBtn = btn.querySelector('#stylesnap-action-mode') as HTMLElement | null
-  if (modeBtn) {
-    modeBtn.innerHTML = MODE_ICON_SVG[inspectMode]
-    modeBtn.style.color = inspectMode > 0 ? MODE_BADGE_COLOR[inspectMode] : ''
-    modeBtn.classList.toggle('is-active', inspectMode > 0)
-  }
+  // mode button group: highlight the active one
+  const modeBtns = btn.querySelectorAll('.stylesnap-mode-btn')
+  modeBtns.forEach((b, i) => {
+    b.classList.toggle('is-active', i === inspectMode)
+  })
 
   // guides
   const target = lockedElement || lastHighlighted
@@ -113,12 +110,6 @@ function setInspectMode(newMode: number) {
     s.inspectMode = inspectMode
     chrome.storage.local.set({ stylesnap_settings: s })
   })
-}
-
-function cycleMode() {
-  setInspectMode((inspectMode + 1) % 4)
-  const labels = ['Off', 'Inspect', 'Guidelines', 'Grid']
-  showToast(`Mode: ${labels[inspectMode]}`)
 }
 
 // ─── Guides ───────────────────────────────────────────────────────────
@@ -415,19 +406,31 @@ function onScroll() {
   if (target) updateGuides(target.getBoundingClientRect())
 }
 
-// ─── Collapse / Expand ────────────────────────────────────────────────
-
-function applyCollapsedState(btn: HTMLElement) {
-  if (isCollapsed) {
-    btn.classList.add('is-collapsed')
-  } else {
-    btn.classList.remove('is-collapsed')
-  }
-}
-
 // ─── Floating Button UI ────────────────────────────────────────────────
 
 const FLOATING_BTN_ID = 'stylesnap-floating-btn'
+
+// Panel hover persistence: use a timeout so the panel doesn't vanish
+// when the mouse briefly leaves the button while moving toward the panel
+let panelHideTimer: number | null = null
+
+function showPanel(panel: HTMLElement) {
+  if (panelHideTimer) { clearTimeout(panelHideTimer); panelHideTimer = null }
+  panel.style.setProperty('opacity', '1', 'important')
+  panel.style.setProperty('visibility', 'visible', 'important')
+  panel.style.setProperty('transform', 'scale(1) translateX(0)', 'important')
+  panel.style.setProperty('pointer-events', 'auto', 'important')
+}
+
+function hidePanel(panel: HTMLElement) {
+  panelHideTimer = window.setTimeout(() => {
+    panel.style.setProperty('opacity', '0', 'important')
+    panel.style.setProperty('visibility', 'hidden', 'important')
+    panel.style.setProperty('transform', 'scale(0.9) translateX(4px)', 'important')
+    panel.style.setProperty('pointer-events', 'none', 'important')
+    panelHideTimer = null
+  }, 350) // 350ms grace period
+}
 
 function injectFloatingBtnStyles() {
   if (document.getElementById('stylesnap-btn-style')) return
@@ -442,7 +445,7 @@ function injectFloatingBtnStyles() {
       border-radius: 50% !important;
       cursor: pointer !important;
       z-index: 2147483647 !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease, right 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease !important;
       user-select: none !important;
       border: none !important;
       outline: none !important;
@@ -461,24 +464,6 @@ function injectFloatingBtnStyles() {
       opacity: 1 !important;
     }
 
-    /* ── Collapsed state (slide to right edge) ── */
-    #stylesnap-floating-btn.is-collapsed {
-      right: -20px !important;
-      border-radius: 50% !important;
-      opacity: 0.55 !important;
-    }
-    #stylesnap-floating-btn.is-collapsed:hover {
-      right: 0px !important;
-      opacity: 1 !important;
-    }
-    #stylesnap-floating-btn.is-collapsed #stylesnap-floating-btn-inner {
-      width: 32px !important;
-      height: 32px !important;
-    }
-    #stylesnap-floating-btn.is-collapsed #stylesnap-floating-panel {
-      display: none !important;
-    }
-
     /* ── Inner circle ── */
     #stylesnap-floating-btn-inner {
       position: relative !important;
@@ -492,7 +477,7 @@ function injectFloatingBtnStyles() {
       z-index: 2 !important;
       box-sizing: border-box !important;
       box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45) !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s, width 0.3s, height 0.3s !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s !important;
     }
     #stylesnap-floating-btn:hover #stylesnap-floating-btn-inner,
     #stylesnap-floating-btn.is-dragging #stylesnap-floating-btn-inner {
@@ -532,23 +517,23 @@ function injectFloatingBtnStyles() {
       position: absolute !important;
       bottom: -1px !important;
       right: -1px !important;
-      min-width: 16px !important;
-      height: 16px !important;
+      width: 18px !important;
+      height: 18px !important;
       background: transparent !important;
       border: 1.5px solid rgba(255,255,255,0.25) !important;
       border-radius: 5px !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      font-size: 9px !important;
-      font-family: ui-monospace, monospace !important;
-      font-weight: 700 !important;
-      color: #fff !important;
-      line-height: 1 !important;
       z-index: 3 !important;
       pointer-events: none !important;
-      padding: 0 2px !important;
+      padding: 0 !important;
       transition: background 0.2s !important;
+    }
+    .stylesnap-mode-badge svg {
+      width: 12px !important;
+      height: 12px !important;
+      color: #fff !important;
     }
 
     /* ── Logo icon ── */
@@ -595,22 +580,15 @@ function injectFloatingBtnStyles() {
       white-space: nowrap !important;
       backdrop-filter: blur(8px) !important;
     }
-    /* hover bridge to prevent gap */
+    /* hover bridge: wider invisible area so panel doesn't disappear */
     #stylesnap-floating-panel::after {
       content: '' !important;
       position: absolute !important;
-      right: -12px !important;
-      bottom: 0 !important;
-      height: 44px !important;
-      width: 22px !important;
+      right: -20px !important;
+      bottom: -8px !important;
+      top: -8px !important;
+      width: 30px !important;
       background: transparent !important;
-    }
-    #stylesnap-floating-btn:hover #stylesnap-floating-panel,
-    #stylesnap-floating-panel:hover {
-      opacity: 1 !important;
-      visibility: visible !important;
-      transform: scale(1) translateX(0) !important;
-      pointer-events: auto !important;
     }
 
     /* ── Panel items ── */
@@ -632,19 +610,55 @@ function injectFloatingBtnStyles() {
       background: rgba(255,255,255,0.08) !important;
       color: #e2e8f0 !important;
     }
-    .stylesnap-panel-item.is-active {
-      color: currentColor !important;
-      background: rgba(99,102,241,0.15) !important;
-    }
-    .stylesnap-panel-item.is-active:hover {
-      background: rgba(99,102,241,0.25) !important;
-    }
     .stylesnap-panel-item svg {
       width: 16px !important;
       height: 16px !important;
     }
     .stylesnap-panel-item:active {
       transform: scale(0.92) !important;
+    }
+
+    /* ── Mode button group (horizontal row) ── */
+    .stylesnap-mode-group {
+      display: flex !important;
+      gap: 2px !important;
+      padding: 2px !important;
+      background: rgba(255,255,255,0.04) !important;
+      border-radius: 10px !important;
+    }
+    .stylesnap-mode-btn {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 28px !important;
+      height: 28px !important;
+      border-radius: 7px !important;
+      background: transparent !important;
+      color: #64748b !important;
+      border: none !important;
+      cursor: pointer !important;
+      transition: all 0.12s !important;
+      position: relative !important;
+    }
+    .stylesnap-mode-btn:hover {
+      background: rgba(255,255,255,0.06) !important;
+      color: #94a3b8 !important;
+    }
+    .stylesnap-mode-btn.is-active {
+      background: rgba(99,102,241,0.2) !important;
+      color: #e2e8f0 !important;
+      box-shadow: 0 0 0 1px rgba(99,102,241,0.3) !important;
+    }
+    .stylesnap-mode-btn.is-active.mode-off { color: #94a3b8 !important; background: rgba(255,255,255,0.06) !important; box-shadow: none !important; }
+    .stylesnap-mode-btn.is-active.mode-inspect { color: #818cf8 !important; background: rgba(99,102,241,0.15) !important; box-shadow: 0 0 0 1px rgba(99,102,241,0.3) !important; }
+    .stylesnap-mode-btn.is-active.mode-guidelines { color: #34d399 !important; background: rgba(16,185,129,0.12) !important; box-shadow: 0 0 0 1px rgba(16,185,129,0.3) !important; }
+    .stylesnap-mode-btn.is-active.mode-grid { color: #38bdf8 !important; background: rgba(56,189,248,0.12) !important; box-shadow: 0 0 0 1px rgba(56,189,248,0.3) !important; }
+    .stylesnap-mode-btn svg {
+      width: 14px !important;
+      height: 14px !important;
+    }
+    .stylesnap-mode-btn:active {
+      transform: scale(0.88) !important;
     }
 
     /* ── Panel divider ── */
@@ -695,30 +709,30 @@ async function initFloatingButton() {
         <div class="stylesnap-mode-badge"></div>
       </div>
       <div id="stylesnap-floating-panel">
-        <button class="stylesnap-panel-item" id="stylesnap-action-mode"
-          title="Cycle mode: Off → Inspect → Guidelines → Grid (G)"
-          style="color: #94a3b8">
-          ${MODE_ICON_SVG[inspectMode]}
-        </button>
+        <div class="stylesnap-mode-group">
+          <button class="stylesnap-mode-btn mode-off" data-mode="0"
+            title="Off">
+            ${MODE_ICON_SVG[0]}
+          </button>
+          <button class="stylesnap-mode-btn mode-inspect" data-mode="1"
+            title="Inspect">
+            ${MODE_ICON_SVG[1]}
+          </button>
+          <button class="stylesnap-mode-btn mode-guidelines" data-mode="2"
+            title="Guidelines">
+            ${MODE_ICON_SVG[2]}
+          </button>
+          <button class="stylesnap-mode-btn mode-grid" data-mode="3"
+            title="Grid">
+            ${MODE_ICON_SVG[3]}
+          </button>
+        </div>
         <div class="stylesnap-panel-divider"></div>
         <button class="stylesnap-panel-item" id="stylesnap-action-copy"
           title="Copy CSS of selected element">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-          </svg>
-        </button>
-        <button class="stylesnap-panel-item" id="stylesnap-action-panel"
-          title="${t.btnPanel}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/>
-          </svg>
-        </button>
-        <div class="stylesnap-panel-divider"></div>
-        <button class="stylesnap-panel-item" id="stylesnap-action-collapse"
-          title="Collapse to edge">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6"/>
           </svg>
         </button>
       </div>
@@ -773,7 +787,7 @@ async function initFloatingButton() {
       isDragging = false
       btn.classList.remove('is-dragging')
       btn.style.setProperty('cursor', 'pointer', 'important')
-      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease, right 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 'important')
+      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
       if (hasMoved) {
         const rect = btn.getBoundingClientRect()
         chrome.storage.local.set({
@@ -785,40 +799,30 @@ async function initFloatingButton() {
       }
     })
 
+    // ─── Panel hover persistence ───
+    const panel = btn.querySelector('#stylesnap-floating-panel') as HTMLElement | null
+
+    // Show panel on main button hover
+    btn.addEventListener('mouseenter', () => {
+      if (panel) showPanel(panel)
+    })
+    btn.addEventListener('mouseleave', () => {
+      if (panel) hidePanel(panel)
+    })
+    // Keep panel visible while hovering over it
+    if (panel) {
+      panel.addEventListener('mouseenter', () => showPanel(panel))
+      panel.addEventListener('mouseleave', () => hidePanel(panel))
+    }
+
     // ─── Button actions ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
-    const modeBtn  = btn.querySelector('#stylesnap-action-mode')
-    const copyBtn  = btn.querySelector('#stylesnap-action-copy')
-    const panelBtn = btn.querySelector('#stylesnap-action-panel')
-    const colBtn   = btn.querySelector('#stylesnap-action-collapse')
 
-    // Main ball click → cycle mode
+    // Main ball click → toggle side panel (like Immersive Translate)
     btnInner?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       if (hasMoved) return
-      cycleMode()
-    })
-
-    // Mode button (in panel) → also cycle
-    modeBtn?.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      cycleMode()
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
-    })
-
-    // Copy CSS
-    copyBtn?.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      copyLockedCSS()
-    })
-
-    // Side Panel
-    panelBtn?.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
       chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
         if (chrome.runtime.lastError) {
           console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
@@ -826,13 +830,26 @@ async function initFloatingButton() {
       })
     })
 
-    // Collapse
-    colBtn?.addEventListener('click', (e) => {
+    // Mode buttons → set mode directly
+    const modeBtns = btn.querySelectorAll('.stylesnap-mode-btn')
+    modeBtns.forEach((modeBtn) => {
+      modeBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const mode = parseInt((modeBtn as HTMLElement).dataset.mode || '0', 10)
+        setInspectMode(mode)
+        const labels = ['Off', 'Inspect', 'Guidelines', 'Grid']
+        showToast(`Mode: ${labels[mode]}`)
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      })
+    })
+
+    // Copy CSS
+    const copyBtn = btn.querySelector('#stylesnap-action-copy')
+    copyBtn?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      isCollapsed = !isCollapsed
-      applyCollapsedState(btn)
-      showToast(isCollapsed ? 'Collapsed — hover to expand' : 'Expanded')
+      copyLockedCSS()
     })
 
     document.body.appendChild(btn)

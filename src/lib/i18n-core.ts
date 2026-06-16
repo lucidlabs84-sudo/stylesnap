@@ -159,7 +159,7 @@ export const translations = {
     autoInspect: 'Auto-inspect on extension open',
     copySound: 'Copy feedback sound',
     // Floating Button Tooltips
-    btnTooltip: 'StyleSnap\nClick: Cycle Mode\nDrag: Move Button',
+    btnTooltip: 'StyleSnap\nClick: Toggle Side Panel\nDrag: Move Button',
     btnInspect: 'Inspect Element',
     btnPanel: 'Toggle Side Panel',
     btnAssist: 'Toggle Assist Mode',
@@ -300,7 +300,7 @@ export const translations = {
     autoInspect: '打开扩展时自动开启审查',
     copySound: '复制成功提示音',
     // Floating Button Tooltips
-    btnTooltip: 'StyleSnap\n点击：循环切换模式\n拖拽：移动位置',
+    btnTooltip: 'StyleSnap\n点击：开关侧边栏\n拖拽：移动位置',
     btnInspect: '审查元素',
     btnPanel: '开关侧边栏',
     btnAssist: '切换辅助线模式',
