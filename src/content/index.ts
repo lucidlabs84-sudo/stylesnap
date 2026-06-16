@@ -68,8 +68,9 @@ function updateModeUI() {
 
   // mode button group: highlight the active one
   const modeBtns = btn.querySelectorAll('.stylesnap-mode-btn')
-  modeBtns.forEach((b, i) => {
-    b.classList.toggle('is-active', i === inspectMode)
+  modeBtns.forEach((b) => {
+    const mode = parseInt((b as HTMLElement).dataset.mode || '0', 10)
+    b.classList.toggle('is-active', mode === inspectMode)
   })
 
   // guides
@@ -618,9 +619,10 @@ function injectFloatingBtnStyles() {
       transform: scale(0.92) !important;
     }
 
-    /* ── Mode button group (horizontal row) ── */
+    /* ── Mode button group (vertical column) ── */
     .stylesnap-mode-group {
       display: flex !important;
+      flex-direction: column !important;
       gap: 2px !important;
       padding: 2px !important;
       background: rgba(255,255,255,0.04) !important;
@@ -649,7 +651,6 @@ function injectFloatingBtnStyles() {
       color: #e2e8f0 !important;
       box-shadow: 0 0 0 1px rgba(99,102,241,0.3) !important;
     }
-    .stylesnap-mode-btn.is-active.mode-off { color: #94a3b8 !important; background: rgba(255,255,255,0.06) !important; box-shadow: none !important; }
     .stylesnap-mode-btn.is-active.mode-inspect { color: #818cf8 !important; background: rgba(99,102,241,0.15) !important; box-shadow: 0 0 0 1px rgba(99,102,241,0.3) !important; }
     .stylesnap-mode-btn.is-active.mode-guidelines { color: #34d399 !important; background: rgba(16,185,129,0.12) !important; box-shadow: 0 0 0 1px rgba(16,185,129,0.3) !important; }
     .stylesnap-mode-btn.is-active.mode-grid { color: #38bdf8 !important; background: rgba(56,189,248,0.12) !important; box-shadow: 0 0 0 1px rgba(56,189,248,0.3) !important; }
@@ -710,10 +711,6 @@ async function initFloatingButton() {
       </div>
       <div id="stylesnap-floating-panel">
         <div class="stylesnap-mode-group">
-          <button class="stylesnap-mode-btn mode-off" data-mode="0"
-            title="Off">
-            ${MODE_ICON_SVG[0]}
-          </button>
           <button class="stylesnap-mode-btn mode-inspect" data-mode="1"
             title="Inspect">
             ${MODE_ICON_SVG[1]}
