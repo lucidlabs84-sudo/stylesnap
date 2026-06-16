@@ -815,16 +815,30 @@ async function initFloatingButton() {
     // ─── Button actions ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
 
-    // Main ball click → toggle side panel (like Immersive Translate)
+    // Main ball click → toggle side panel AND close inspect (like Immersive Translate)
     btnInner?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       if (hasMoved) return
-      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
-        if (chrome.runtime.lastError) {
-          console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
-        }
-      })
+
+      // If inspect is active, turn it off first (same as clicking the active mode button)
+      if (isActive()) {
+        setInspectMode(0)
+        showToast('Inspector off')
+        // Still toggle panel closed
+        chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
+          if (chrome.runtime.lastError) {
+            console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
+          }
+        })
+      } else {
+        // Not active → open side panel
+        chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
+          if (chrome.runtime.lastError) {
+            console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
+          }
+        })
+      }
     })
 
     // Mode buttons → set mode directly
