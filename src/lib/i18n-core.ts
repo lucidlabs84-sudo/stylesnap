@@ -159,10 +159,13 @@ export const translations = {
     autoInspect: 'Auto-inspect on extension open',
     copySound: 'Copy feedback sound',
     // Floating Button Tooltips
-    btnTooltip: 'StyleSnap\nClick: Toggle Inspect\nDrag: Move Button',
+    btnTooltip: 'StyleSnap\nClick: Cycle Mode\nDrag: Move Button',
     btnInspect: 'Inspect Element',
     btnPanel: 'Toggle Side Panel',
     btnAssist: 'Toggle Assist Mode',
+    btnMode: 'Cycle mode: Off → Inspect → Guidelines → Grid  [G]',
+    btnCopyCSS: 'Copy CSS of selected element',
+    btnCollapse: 'Collapse to edge',
     // Assist Mode
     assistModeLabel: 'Assist Mode',
     assistOff: 'Off',
@@ -297,10 +300,13 @@ export const translations = {
     autoInspect: '打开扩展时自动开启审查',
     copySound: '复制成功提示音',
     // Floating Button Tooltips
-    btnTooltip: 'StyleSnap\n点击：开关审查\n拖拽：移动位置',
+    btnTooltip: 'StyleSnap\n点击：循环切换模式\n拖拽：移动位置',
     btnInspect: '审查元素',
     btnPanel: '开关侧边栏',
     btnAssist: '切换辅助线模式',
+    btnMode: '循环模式：关闭 → 审查 → 参考线 → 网格  [G]',
+    btnCopyCSS: '复制选中元素的 CSS',
+    btnCollapse: '收起到屏幕边缘',
     // Assist Mode
     assistModeLabel: '辅助线模式',
     assistOff: '关闭',

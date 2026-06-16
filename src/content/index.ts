@@ -11,37 +11,117 @@ import type { ParsedCSS } from '@/shared/types'
 
 // ─── State ────────────────────────────────────────────────────────────
 
-let isActive = false
+/**
+ * inspectMode:
+ *   0 = Off
+ *   1 = Inspect (hover highlight + CSS overlay)
+ *   2 = Guidelines (crosshairs)
+ *   3 = Grid (all-element outlines)
+ */
+let inspectMode = 0
 let lastHighlighted: Element | null = null
 let lockedElement: Element | null = null
-let assistMode = 1 // 0: Off, 1: Guidelines (Crosshairs), 2: Grid (Outlines)
+let isCollapsed = false
+
+// derived helpers
+const isActive = () => inspectMode > 0
+const assistMode = () => (inspectMode >= 2 ? inspectMode - 1 : 0) // 0=off, 1=lines, 2=grid
+
 const OVERLAY_ID = 'stylesnap-overlay'
 const HIGHLIGHT_CLASS = 'stylesnap-highlight'
 const LOCKED_CLASS = 'stylesnap-locked'
 
-function updateAssistModeUI() {
+// ─── Mode badge mapping ────────────────────────────────────────────────
+const MODE_BADGE = ['', 'I', 'L', 'G'] as const
+const MODE_BADGE_COLOR = ['#5F5E5A', '#534AB7', '#0F6E56', '#185FA5'] as const
+const MODE_ICON_SVG = [
+  // 0: Off
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
+  // 1: Inspect
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`,
+  // 2: Guidelines
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>`,
+  // 3: Grid
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`,
+] as const
+
+function updateModeUI() {
+  // body class for overlay modes
   document.body.classList.remove('stylesnap-mode-guidelines', 'stylesnap-mode-grid')
-  if (assistMode === 1) {
-    document.body.classList.add('stylesnap-mode-guidelines')
-  } else if (assistMode === 2) {
-    document.body.classList.add('stylesnap-mode-grid')
+  if (inspectMode === 2) document.body.classList.add('stylesnap-mode-guidelines')
+  else if (inspectMode === 3) document.body.classList.add('stylesnap-mode-grid')
+
+  // floating button state
+  const btn = document.getElementById(FLOATING_BTN_ID)
+  if (!btn) return
+
+  // active ring animation
+  if (inspectMode > 0) btn.classList.add('is-active')
+  else btn.classList.remove('is-active')
+
+  // corner badge
+  const badge = btn.querySelector('.stylesnap-mode-badge') as HTMLElement | null
+  if (badge) {
+    badge.textContent = MODE_BADGE[inspectMode]
+    badge.style.background = inspectMode > 0 ? MODE_BADGE_COLOR[inspectMode] : 'transparent'
+    badge.style.border = inspectMode === 0 ? '1.5px solid rgba(255,255,255,0.25)' : 'none'
   }
 
-  // Update floating panel button state
-  const assistBtn = document.getElementById('stylesnap-action-assist')
-  if (assistBtn) {
-    if (assistMode === 0) {
-      assistBtn.classList.remove('is-active')
-      assistBtn.setAttribute('data-mode', 'OFF')
-    } else if (assistMode === 1) {
-      assistBtn.classList.add('is-active')
-      assistBtn.setAttribute('data-mode', 'L') // L for Line/Guidelines
-    } else if (assistMode === 2) {
-      assistBtn.classList.add('is-active')
-      assistBtn.setAttribute('data-mode', 'G') // G for Grid
-    }
+  // mode button icon + color
+  const modeBtn = btn.querySelector('#stylesnap-action-mode') as HTMLElement | null
+  if (modeBtn) {
+    modeBtn.innerHTML = MODE_ICON_SVG[inspectMode]
+    modeBtn.style.color = inspectMode > 0 ? MODE_BADGE_COLOR[inspectMode] : ''
+    modeBtn.classList.toggle('is-active', inspectMode > 0)
   }
+
+  // guides
+  const target = lockedElement || lastHighlighted
+  if (target) updateGuides(target.getBoundingClientRect())
 }
+
+// ─── Inspector activation/deactivation ─────────────────────────────────
+
+function applyInspectorListeners(add: boolean) {
+  const method = add ? 'addEventListener' : 'removeEventListener'
+  document.documentElement[method]('mousemove', onMouseMove as EventListener, true)
+  document.documentElement[method]('click', onClick as EventListener, true)
+  document.documentElement[method]('keydown', onKeyDown as EventListener, true)
+  document.documentElement[method]('scroll', onScroll as EventListener, true)
+}
+
+function setInspectMode(newMode: number) {
+  const wasActive = isActive()
+  inspectMode = newMode
+  const nowActive = isActive()
+
+  if (!wasActive && nowActive) {
+    initGuides()
+    applyInspectorListeners(true)
+  } else if (wasActive && !nowActive) {
+    applyInspectorListeners(false)
+    unlockElement()
+    removeHighlight()
+    hideOverlay()
+  }
+
+  updateModeUI()
+
+  // persist
+  chrome.storage.local.get(['stylesnap_settings'], (res) => {
+    const s = res.stylesnap_settings || {}
+    s.inspectMode = inspectMode
+    chrome.storage.local.set({ stylesnap_settings: s })
+  })
+}
+
+function cycleMode() {
+  setInspectMode((inspectMode + 1) % 4)
+  const labels = ['Off', 'Inspect', 'Guidelines', 'Grid']
+  showToast(`Mode: ${labels[inspectMode]}`)
+}
+
+// ─── Guides ───────────────────────────────────────────────────────────
 
 function initGuides() {
   const ids = ['stylesnap-guide-t', 'stylesnap-guide-b', 'stylesnap-guide-l', 'stylesnap-guide-r']
@@ -57,7 +137,7 @@ function initGuides() {
 }
 
 function updateGuides(rect: DOMRect) {
-  if (assistMode !== 1) return
+  if (assistMode() !== 1) return
   const t = document.getElementById('stylesnap-guide-t')
   const b = document.getElementById('stylesnap-guide-b')
   const l = document.getElementById('stylesnap-guide-l')
@@ -78,12 +158,9 @@ function getOrCreateOverlay(): HTMLElement {
     overlay = document.createElement('div')
     overlay.id = OVERLAY_ID
     overlay.setAttribute('data-stylesnap', 'true')
-    
-    // Set initial language attribute
     chrome.storage.local.get(['language'], (res) => {
       overlay!.setAttribute('data-lang', res.language || 'en')
     })
-    
     document.body.appendChild(overlay)
   }
   return overlay
@@ -112,29 +189,20 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     <pre class="ss-css">${cssPreview}</pre>
   `
 
-  // Position overlay
-  // 先将 display 设为 block 以便获取悬浮框的真实尺寸
   overlay.style.setProperty('display', 'block', 'important')
   const overlayRect = overlay.getBoundingClientRect()
   const overlayWidth = overlayRect.width || 320
   const overlayHeight = overlayRect.height || 150
 
-  // 默认放在元素下方 (使用 fixed 定位，无需 scrollX/Y)
   let top = rect.bottom + 4
   let left = rect.left
-  overlay.style.setProperty('transform', 'none', 'important') // 重置 transform
+  overlay.style.setProperty('transform', 'none', 'important')
 
-  // 如果下方空间不够，放在元素上方
   if (rect.bottom + overlayHeight + 10 > window.innerHeight) {
     top = rect.top - overlayHeight - 4
-    
-    // 如果上方空间也不够，就固定在视口底部
-    if (top < 0) {
-      top = window.innerHeight - overlayHeight - 10
-    }
+    if (top < 0) top = window.innerHeight - overlayHeight - 10
   }
 
-  // 处理水平方向边界
   const maxLeft = window.innerWidth - overlayWidth - 10
   left = Math.max(10, Math.min(left, maxLeft))
 
@@ -162,18 +230,13 @@ function removeHighlight() {
 }
 
 function lockElement(el: Element) {
-  if (lockedElement) {
-    lockedElement.classList.remove(LOCKED_CLASS)
-  }
+  if (lockedElement) lockedElement.classList.remove(LOCKED_CLASS)
   lockedElement = el
   el.classList.add(LOCKED_CLASS)
   el.classList.remove(HIGHLIGHT_CLASS)
   lastHighlighted = null
-
   const overlay = document.getElementById(OVERLAY_ID)
-  if (overlay) {
-    overlay.classList.add('ss-interactive')
-  }
+  if (overlay) overlay.classList.add('ss-interactive')
 }
 
 function unlockElement() {
@@ -181,17 +244,33 @@ function unlockElement() {
     lockedElement.classList.remove(LOCKED_CLASS)
     lockedElement = null
   }
-  
   const overlay = document.getElementById(OVERLAY_ID)
-  if (overlay) {
-    overlay.classList.remove('ss-interactive')
+  if (overlay) overlay.classList.remove('ss-interactive')
+}
+
+// ─── Copy CSS ─────────────────────────────────────────────────────────
+
+function copyLockedCSS() {
+  if (!lockedElement) {
+    showToast('No element selected — click an element first')
+    return
   }
+  const parsedCSS = parseElement(lockedElement)
+  const cssText = Object.entries(parsedCSS.styles)
+    .map(([k, v]) => `  ${k}: ${v};`)
+    .join('\n')
+  const output = `${lockedElement.tagName.toLowerCase()} {\n${cssText}\n}`
+  navigator.clipboard.writeText(output).then(() => {
+    showToast('CSS copied!')
+  }).catch(() => {
+    showToast('Copy failed')
+  })
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────
 
 function onMouseMove(e: MouseEvent) {
-  if (!isActive || lockedElement) return
+  if (!isActive() || lockedElement) return
   const el = document.elementFromPoint(e.clientX, e.clientY)
   if (!el || el.closest('[data-stylesnap]')) return
   if (el === lastHighlighted) return
@@ -214,24 +293,15 @@ function onMouseMove(e: MouseEvent) {
 }
 
 function onClick(e: MouseEvent) {
-  if (!isActive) return
+  if (!isActive()) return
   const el = document.elementFromPoint(e.clientX, e.clientY)
-  
-  // 如果点击的是 overlay 内部，不要触发解锁或新元素的锁定
-  if (el && el.closest('#' + OVERLAY_ID)) {
-    return
-  }
 
-  // 如果点击了扩展的 UI（例如右下角的悬浮按钮），直接忽略
-  // 必须确保点击悬浮面板的按钮时不会意外触发这里
-  if (el && (el.closest('[data-stylesnap]') || el.closest('#' + FLOATING_BTN_ID))) {
-    return
-  }
+  if (el && el.closest('#' + OVERLAY_ID)) return
+  if (el && (el.closest('[data-stylesnap]') || el.closest('#' + FLOATING_BTN_ID))) return
 
   e.preventDefault()
   e.stopPropagation()
 
-  // 如果点到了非元素区域 (比如 document 空白)，或者点到了 `<html>`/`<body>`，视为空白处解锁
   if (!el || el === document.documentElement || el === document.body) {
     if (lockedElement) {
       unlockElement()
@@ -241,18 +311,13 @@ function onClick(e: MouseEvent) {
     return
   }
 
-  // 此时 el 是网页中有效的一个元素
   if (lockedElement) {
-    // 无论点击的是已锁定的元素本身，还是其他有效元素，
-    // 都认为用户的意图是“取消当前的锁定状态”
     unlockElement()
     chrome.runtime.sendMessage({ type: 'ELEMENT_UNLOCKED' }).catch(() => {})
-    // 手动触发一次 hover 以更新高亮和信息框
     onMouseMove(e)
     return
   }
 
-  // 当前没有锁定任何元素，正常执行锁定
   lockElement(el)
 
   const parsedCSS = parseElement(el)
@@ -277,47 +342,31 @@ function onClick(e: MouseEvent) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  // Ignore if typing in an input
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) {
-    return
-  }
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target as HTMLElement).isContentEditable) return
 
-  if (isActive && (e.key === 'g' || e.key === 'G')) {
+  if (isActive() && (e.key === 'g' || e.key === 'G')) {
     e.preventDefault()
     e.stopPropagation()
-    assistMode = (assistMode + 1) % 3
-    updateAssistModeUI()
-    
-    // Save to settings
-    chrome.storage.local.get(['stylesnap_settings'], (res) => {
-      const s = res.stylesnap_settings || {}
-      s.assistMode = assistMode
-      chrome.storage.local.set({ stylesnap_settings: s })
-    })
-    
-    // Show a quick toast
-    const modeNames = ['Assist: OFF', 'Assist: Guidelines', 'Assist: Grid']
-    showToast(modeNames[assistMode])
-
+    // cycle only the visual assist layer (2/3), keep inspect on
+    if (inspectMode === 1) setInspectMode(2)
+    else if (inspectMode === 2) setInspectMode(3)
+    else if (inspectMode === 3) setInspectMode(1)
+    const labels = ['Off', 'Inspect', 'Guidelines', 'Grid']
+    showToast(`Mode: ${labels[inspectMode]}`)
     const target = lockedElement || lastHighlighted
-    if (target) {
-      updateGuides(target.getBoundingClientRect())
-    }
+    if (target) updateGuides(target.getBoundingClientRect())
     return
   }
 
-  if (e.key === 'Escape' && isActive) {
+  if (e.key === 'Escape' && isActive()) {
     e.preventDefault()
     e.stopPropagation()
-    
     if (lockedElement) {
-      // 第一次按 ESC 解除锁定
       unlockElement()
       chrome.runtime.sendMessage({ type: 'ELEMENT_UNLOCKED' }).catch(() => {})
       hideOverlay()
     } else {
-      // 第二次按 ESC 退出审查模式
-      disableInspector()
+      setInspectMode(0)
       chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
     }
   }
@@ -352,10 +401,8 @@ function showToast(message: string) {
     })
     document.body.appendChild(toast)
   }
-  
   toast.textContent = message
   toast.style.opacity = '1'
-  
   if (toastTimeout) window.clearTimeout(toastTimeout)
   toastTimeout = window.setTimeout(() => {
     if (toast) toast.style.opacity = '0'
@@ -363,60 +410,18 @@ function showToast(message: string) {
 }
 
 function onScroll() {
-  if (!isActive) return
+  if (!isActive()) return
   const target = lockedElement || lastHighlighted
-  if (target) {
-    updateGuides(target.getBoundingClientRect())
-  }
+  if (target) updateGuides(target.getBoundingClientRect())
 }
 
-// ─── Inspector control ────────────────────────────────────────────────
+// ─── Collapse / Expand ────────────────────────────────────────────────
 
-function enableInspector() {
-  if (isActive) return
-  isActive = true
-  initGuides()
-  
-  // Load assistMode from settings
-  chrome.storage.local.get(['stylesnap_settings'], (res) => {
-    if (res.stylesnap_settings && res.stylesnap_settings.assistMode !== undefined) {
-      assistMode = res.stylesnap_settings.assistMode
-    } else {
-      assistMode = 1 // default
-    }
-    updateAssistModeUI()
-  })
-
-  document.addEventListener('mousemove', onMouseMove, true)
-  document.addEventListener('click', onClick, true)
-  document.addEventListener('keydown', onKeyDown, true)
-  document.addEventListener('scroll', onScroll, true)
-
-  const btn = document.getElementById(FLOATING_BTN_ID)
-  if (btn) {
-    btn.classList.add('is-active')
-    const inspectBtn = document.getElementById('stylesnap-action-inspect')
-    if (inspectBtn) inspectBtn.classList.add('is-active')
-  }
-}
-
-function disableInspector() {
-  isActive = false
-  assistMode = 0
-  updateAssistModeUI()
-  document.removeEventListener('mousemove', onMouseMove, true)
-  document.removeEventListener('click', onClick, true)
-  document.removeEventListener('keydown', onKeyDown, true)
-  document.removeEventListener('scroll', onScroll, true)
-  unlockElement()
-  removeHighlight()
-  hideOverlay()
-
-  const btn = document.getElementById(FLOATING_BTN_ID)
-  if (btn) {
-    btn.classList.remove('is-active')
-    const inspectBtn = document.getElementById('stylesnap-action-inspect')
-    if (inspectBtn) inspectBtn.classList.remove('is-active')
+function applyCollapsedState(btn: HTMLElement) {
+  if (isCollapsed) {
+    btn.classList.add('is-collapsed')
+  } else {
+    btn.classList.remove('is-collapsed')
   }
 }
 
@@ -434,10 +439,10 @@ function injectFloatingBtnStyles() {
       bottom: 24px !important;
       right: 24px !important;
       padding: 0 !important;
-      border-radius: 50% !important; /* 关键修复：确保容器本身是正圆形，裁剪超出部分的流光 */
+      border-radius: 50% !important;
       cursor: pointer !important;
       z-index: 2147483647 !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease, right 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
       user-select: none !important;
       border: none !important;
       outline: none !important;
@@ -446,57 +451,73 @@ function injectFloatingBtnStyles() {
       display: flex !important;
       align-items: center !important;
       box-sizing: border-box !important;
-      width: 40px !important;
-      height: 40px !important;
-      opacity: 0.4 !important; /* 默认半透明以防遮挡 */
+      width: 44px !important;
+      height: 44px !important;
+      opacity: 0.45 !important;
     }
     #stylesnap-floating-btn:hover,
     #stylesnap-floating-btn.is-active,
     #stylesnap-floating-btn.is-dragging {
-      opacity: 1 !important; /* 交互时恢复不透明 */
+      opacity: 1 !important;
     }
+
+    /* ── Collapsed state (slide to right edge) ── */
+    #stylesnap-floating-btn.is-collapsed {
+      right: -20px !important;
+      border-radius: 50% !important;
+      opacity: 0.55 !important;
+    }
+    #stylesnap-floating-btn.is-collapsed:hover {
+      right: 0px !important;
+      opacity: 1 !important;
+    }
+    #stylesnap-floating-btn.is-collapsed #stylesnap-floating-btn-inner {
+      width: 32px !important;
+      height: 32px !important;
+    }
+    #stylesnap-floating-btn.is-collapsed #stylesnap-floating-panel {
+      display: none !important;
+    }
+
+    /* ── Inner circle ── */
     #stylesnap-floating-btn-inner {
       position: relative !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      width: 40px !important;
-      height: 40px !important;
+      width: 44px !important;
+      height: 44px !important;
       background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
       border-radius: 50% !important;
       z-index: 2 !important;
       box-sizing: border-box !important;
-      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4) !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s !important;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45) !important;
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s, width 0.3s, height 0.3s !important;
     }
     #stylesnap-floating-btn:hover #stylesnap-floating-btn-inner,
     #stylesnap-floating-btn.is-dragging #stylesnap-floating-btn-inner {
-      transform: scale(1.05) translateY(-2px) !important;
+      transform: scale(1.06) translateY(-2px) !important;
     }
     #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
-      background: linear-gradient(135deg, #10b981, #059669) !important;
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4) !important;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.55) !important;
     }
-    /* 流光外壳包裹层，用于裁剪溢出 */
+
+    /* ── Spinning ring (active state) ── */
     #stylesnap-floating-btn-ring {
       position: absolute !important;
-      top: 0 !important;
-      left: 0 !important;
-      width: 100% !important;
-      height: 100% !important;
+      top: 0 !important; left: 0 !important;
+      width: 100% !important; height: 100% !important;
       border-radius: 50% !important;
       overflow: hidden !important;
       z-index: 1 !important;
       pointer-events: none !important;
     }
-
     #stylesnap-floating-btn-ring::before {
       content: '' !important;
       position: absolute !important;
-      top: 50% !important;
-      left: 50% !important;
-      width: 140% !important;
-      height: 140% !important;
+      top: 50% !important; left: 50% !important;
+      width: 140% !important; height: 140% !important;
       background: conic-gradient(transparent, #6ee7b7, transparent 30%) !important;
       transform-origin: center center !important;
       animation: stylesnap-btn-rotate 2s linear infinite !important;
@@ -505,121 +526,138 @@ function injectFloatingBtnStyles() {
     #stylesnap-floating-btn.is-active #stylesnap-floating-btn-ring::before {
       display: block !important;
     }
-    /* 悬浮面板 */
-    #stylesnap-floating-panel {
-      position: absolute !important;
-      right: 48px !important; /* 在按钮左侧展开 */
-      bottom: 0 !important; /* 从底部对齐开始向上展开 */
-      transform: scale(0.9) !important;
-      transform-origin: right bottom !important; /* 动画原点改为右下角 */
-      background: #1e293b !important;
-      border: 1px solid rgba(255,255,255,0.1) !important;
-      border-radius: 12px !important;
-      padding: 6px !important;
-      display: flex !important;
-      flex-direction: column !important; /* 垂直排列 */
-      gap: 4px !important;
-      opacity: 0 !important;
-      visibility: hidden !important;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
-      z-index: 1 !important;
-      pointer-events: none !important;
-      white-space: nowrap !important;
-    }
-    
-    /* 
-      关键修复：增加一个不可见的“桥梁”区域 
-      防止鼠标从按钮移动到面板时，因为存在缝隙导致 hover 状态丢失 
-    */
-    #stylesnap-floating-panel::after {
-      content: '' !important;
-      position: absolute !important;
-      right: -10px !important; /* 填补 right: 48px 产生的空隙 */
-      bottom: 0 !important; /* 桥梁也靠下对齐 */
-      height: 40px !important; /* 只在主按钮高度范围内搭桥 */
-      width: 20px !important;
-      background: transparent !important;
-    }
 
-    #stylesnap-floating-btn:hover #stylesnap-floating-panel,
-    #stylesnap-floating-panel:hover {
-      opacity: 1 !important;
-      visibility: visible !important;
-      transform: scale(1) !important;
-      pointer-events: auto !important;
-    }
-    .stylesnap-panel-item {
+    /* ── Mode badge (bottom-right corner of ball) ── */
+    .stylesnap-mode-badge {
+      position: absolute !important;
+      bottom: -1px !important;
+      right: -1px !important;
+      min-width: 16px !important;
+      height: 16px !important;
+      background: transparent !important;
+      border: 1.5px solid rgba(255,255,255,0.25) !important;
+      border-radius: 5px !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      width: 32px !important;
-      height: 32px !important;
-      border-radius: 8px !important;
-      background: transparent !important;
-      color: #94a3b8 !important;
-      border: none !important;
-      cursor: pointer !important;
-      transition: all 0.15s !important;
-      position: relative !important;
-    }
-    .stylesnap-panel-item:hover {
-      background: rgba(255,255,255,0.1) !important;
+      font-size: 9px !important;
+      font-family: ui-monospace, monospace !important;
+      font-weight: 700 !important;
       color: #fff !important;
-    }
-    /* 状态激活时的样式 */
-    .stylesnap-panel-item.is-active {
-      color: #10b981 !important; /* emerald-500 */
-      background: rgba(16, 185, 129, 0.1) !important;
-    }
-    .stylesnap-panel-item.is-active:hover {
-      background: rgba(16, 185, 129, 0.2) !important;
-    }
-    
-    /* 当前辅助线模式角标提示 */
-    #stylesnap-action-assist::after {
-      content: attr(data-mode) !important;
-      position: absolute !important;
-      bottom: 2px !important;
-      right: 2px !important;
-      font-size: 8px !important;
-      font-family: monospace !important;
-      font-weight: bold !important;
-      background: #1e293b !important;
-      padding: 0 2px !important;
-      border-radius: 2px !important;
       line-height: 1 !important;
+      z-index: 3 !important;
+      pointer-events: none !important;
+      padding: 0 2px !important;
+      transition: background 0.2s !important;
     }
-    .stylesnap-panel-item svg {
-      width: 16px !important;
-      height: 16px !important;
-    }
-    
-    @keyframes stylesnap-btn-rotate {
-      0% { transform: translate(-50%, -50%) rotate(0deg); }
-      100% { transform: translate(-50%, -50%) rotate(360deg); }
-    }
+
+    /* ── Logo icon ── */
     .stylesnap-logo-icon {
-      width: 24px !important;
-      height: 24px !important;
+      width: 26px !important;
+      height: 26px !important;
       background: #fff !important;
       color: #6366f1 !important;
       border-radius: 8px !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
-      font-size: 16px !important;
+      font-size: 15px !important;
       font-weight: 900 !important;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
       font-family: ui-sans-serif, system-ui, sans-serif !important;
       box-sizing: border-box !important;
       transition: color 0.2s, transform 0.2s !important;
     }
-    #stylesnap-floating-btn.is-active .stylesnap-logo-icon {
-      color: #10b981 !important;
-    }
     #stylesnap-floating-btn:active .stylesnap-logo-icon {
       transform: scale(0.9) !important;
+    }
+
+    /* ── Floating panel ── */
+    #stylesnap-floating-panel {
+      position: absolute !important;
+      right: 52px !important;
+      bottom: 0 !important;
+      transform: scale(0.9) translateX(4px) !important;
+      transform-origin: right bottom !important;
+      background: rgba(15, 23, 42, 0.96) !important;
+      border: 1px solid rgba(255,255,255,0.1) !important;
+      border-radius: 14px !important;
+      padding: 6px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 2px !important;
+      opacity: 0 !important;
+      visibility: hidden !important;
+      transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      box-shadow: 0 12px 28px -6px rgba(0,0,0,0.4), 0 4px 8px rgba(0,0,0,0.15) !important;
+      z-index: 1 !important;
+      pointer-events: none !important;
+      white-space: nowrap !important;
+      backdrop-filter: blur(8px) !important;
+    }
+    /* hover bridge to prevent gap */
+    #stylesnap-floating-panel::after {
+      content: '' !important;
+      position: absolute !important;
+      right: -12px !important;
+      bottom: 0 !important;
+      height: 44px !important;
+      width: 22px !important;
+      background: transparent !important;
+    }
+    #stylesnap-floating-btn:hover #stylesnap-floating-panel,
+    #stylesnap-floating-panel:hover {
+      opacity: 1 !important;
+      visibility: visible !important;
+      transform: scale(1) translateX(0) !important;
+      pointer-events: auto !important;
+    }
+
+    /* ── Panel items ── */
+    .stylesnap-panel-item {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 34px !important;
+      height: 34px !important;
+      border-radius: 9px !important;
+      background: transparent !important;
+      color: #94a3b8 !important;
+      border: none !important;
+      cursor: pointer !important;
+      transition: all 0.12s !important;
+      position: relative !important;
+    }
+    .stylesnap-panel-item:hover {
+      background: rgba(255,255,255,0.08) !important;
+      color: #e2e8f0 !important;
+    }
+    .stylesnap-panel-item.is-active {
+      color: currentColor !important;
+      background: rgba(99,102,241,0.15) !important;
+    }
+    .stylesnap-panel-item.is-active:hover {
+      background: rgba(99,102,241,0.25) !important;
+    }
+    .stylesnap-panel-item svg {
+      width: 16px !important;
+      height: 16px !important;
+    }
+    .stylesnap-panel-item:active {
+      transform: scale(0.92) !important;
+    }
+
+    /* ── Panel divider ── */
+    .stylesnap-panel-divider {
+      height: 1px !important;
+      background: rgba(255,255,255,0.08) !important;
+      margin: 2px 6px !important;
+    }
+
+    /* ── Rotate animation ── */
+    @keyframes stylesnap-btn-rotate {
+      0% { transform: translate(-50%, -50%) rotate(0deg); }
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
     }
   `
   document.head.appendChild(style)
@@ -633,55 +671,65 @@ async function initFloatingButton() {
       if (existing) existing.remove()
       return
     }
-
     if (document.getElementById(FLOATING_BTN_ID)) return
 
-    // 获取当前语言并获取翻译
     const lang = await detectLang()
     const t = translations[lang] || translations.en
+
+    // restore saved mode
+    if (s.inspectMode !== undefined) {
+      inspectMode = s.inspectMode as number
+    }
 
     injectFloatingBtnStyles()
 
     const btn = document.createElement('button')
     btn.id = FLOATING_BTN_ID
     btn.setAttribute('data-stylesnap', 'true')
-    btn.title = t.btnTooltip // 国际化的鼠标悬停提示
-    
+    btn.title = t.btnTooltip
+
     btn.innerHTML = `
       <div id="stylesnap-floating-btn-ring"></div>
       <div id="stylesnap-floating-btn-inner">
         <div class="stylesnap-logo-icon">S</div>
+        <div class="stylesnap-mode-badge"></div>
       </div>
       <div id="stylesnap-floating-panel">
-        <button class="stylesnap-panel-item ${isActive ? 'is-active' : ''}" id="stylesnap-action-inspect" title="${t.btnInspect}">
+        <button class="stylesnap-panel-item" id="stylesnap-action-mode"
+          title="Cycle mode: Off → Inspect → Guidelines → Grid (G)"
+          style="color: #94a3b8">
+          ${MODE_ICON_SVG[inspectMode]}
+        </button>
+        <div class="stylesnap-panel-divider"></div>
+        <button class="stylesnap-panel-item" id="stylesnap-action-copy"
+          title="Copy CSS of selected element">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 3h18v18H3zM12 8v8M8 12h8"/>
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
         </button>
-        <button class="stylesnap-panel-item ${assistMode > 0 ? 'is-active' : ''}" id="stylesnap-action-assist" title="${t.btnAssist}" data-mode="${assistMode === 1 ? 'L' : assistMode === 2 ? 'G' : 'OFF'}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-            <path d="M3 9h18"/>
-            <path d="M9 21V9"/>
-          </svg>
-        </button>
-        <button class="stylesnap-panel-item" id="stylesnap-action-panel" title="${t.btnPanel}">
+        <button class="stylesnap-panel-item" id="stylesnap-action-panel"
+          title="${t.btnPanel}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="15" y1="3" x2="15" y2="21"/>
+          </svg>
+        </button>
+        <div class="stylesnap-panel-divider"></div>
+        <button class="stylesnap-panel-item" id="stylesnap-action-collapse"
+          title="Collapse to edge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
           </svg>
         </button>
       </div>
     `
 
-    // ─── Drag and Drop Logic ───
+    // ─── Drag ───
     let isDragging = false
     let hasMoved = false
-    let startX = 0
-    let startY = 0
-    let initialRight = 24
-    let initialBottom = 24
+    let startX = 0, startY = 0
+    let initialRight = 24, initialBottom = 24
 
-    // Load saved position
     chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
       if (res.stylesnap_btn_pos) {
         btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
@@ -690,46 +738,31 @@ async function initFloatingButton() {
     })
 
     btn.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return // Only left click
+      if (e.button !== 0) return
       isDragging = true
       hasMoved = false
       startX = e.clientX
       startY = e.clientY
-      
-      // Get current computed style
       const rect = btn.getBoundingClientRect()
       initialRight = window.innerWidth - rect.right
       initialBottom = window.innerHeight - rect.bottom
-      
-      // Add grabbing style
       btn.classList.add('is-dragging')
       btn.style.setProperty('cursor', 'grabbing', 'important')
-      btn.style.setProperty('transition', 'none', 'important') // Disable transition during drag
-      
-      e.preventDefault() // Prevent text selection
+      btn.style.setProperty('transition', 'opacity 0.3s ease', 'important')
+      e.preventDefault()
     })
 
     window.addEventListener('mousemove', (e) => {
       if (!isDragging) return
-      
       const dx = e.clientX - startX
       const dy = e.clientY - startY
-      
-      // Consider it a drag only if moved more than 3px
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-        hasMoved = true
-      }
-      
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true
       if (hasMoved) {
         let newRight = initialRight - dx
         let newBottom = initialBottom - dy
-        
-        // Boundaries
-        const padding = 10
-        const btnSize = 40
+        const padding = 10, btnSize = 44
         newRight = Math.max(padding, Math.min(newRight, window.innerWidth - btnSize - padding))
         newBottom = Math.max(padding, Math.min(newBottom, window.innerHeight - btnSize - padding))
-        
         btn.style.setProperty('right', `${newRight}px`, 'important')
         btn.style.setProperty('bottom', `${newBottom}px`, 'important')
       }
@@ -738,14 +771,10 @@ async function initFloatingButton() {
     window.addEventListener('mouseup', () => {
       if (!isDragging) return
       isDragging = false
-      
-      // Restore styles
       btn.classList.remove('is-dragging')
       btn.style.setProperty('cursor', 'pointer', 'important')
-      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
-      
+      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease, right 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 'important')
       if (hasMoved) {
-        // Save new position
         const rect = btn.getBoundingClientRect()
         chrome.storage.local.set({
           stylesnap_btn_pos: {
@@ -756,66 +785,38 @@ async function initFloatingButton() {
       }
     })
 
-    // ─── Click & Context Menu Logic ───
+    // ─── Button actions ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
-    const actionInspect = btn.querySelector('#stylesnap-action-inspect')
-    const actionAssist = btn.querySelector('#stylesnap-action-assist')
-    const actionPanel = btn.querySelector('#stylesnap-action-panel')
+    const modeBtn  = btn.querySelector('#stylesnap-action-mode')
+    const copyBtn  = btn.querySelector('#stylesnap-action-copy')
+    const panelBtn = btn.querySelector('#stylesnap-action-panel')
+    const colBtn   = btn.querySelector('#stylesnap-action-collapse')
 
-    const toggleInspector = () => {
-      if (isActive) {
-        disableInspector()
-        chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
-      } else {
-        enableInspector()
-        chrome.runtime.sendMessage({ type: 'INIT_INSPECTOR' }).catch(() => {})
-      }
-    }
-
+    // Main ball click → cycle mode
     btnInner?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      
       if (hasMoved) return
-      
-      // Default action: toggle inspector
-      toggleInspector()
+      cycleMode()
     })
 
-    actionInspect?.addEventListener('click', (e) => {
+    // Mode button (in panel) → also cycle
+    modeBtn?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      toggleInspector()
-      
-      // If we just enabled inspector, we probably don't want the menu to stay open
-      // In CSS, hover state handles the menu, but clicking might keep focus on the button.
-      // We can force blur to help reset state if needed
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur()
-      }
+      cycleMode()
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
     })
 
-    actionAssist?.addEventListener('click', (e) => {
+    // Copy CSS
+    copyBtn?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      
-      assistMode = (assistMode + 1) % 3
-      updateAssistModeUI()
-      
-      // If assist mode is turned on (1 or 2), we should probably ensure inspector is active
-      if (assistMode > 0 && !isActive) {
-        toggleInspector()
-      }
-      
-      // Save to storage
-      chrome.storage.local.get(['stylesnap_settings'], (res) => {
-        const settings = res.stylesnap_settings || {}
-        settings.assistMode = assistMode
-        chrome.storage.local.set({ stylesnap_settings: settings })
-      })
+      copyLockedCSS()
     })
 
-    actionPanel?.addEventListener('click', (e) => {
+    // Side Panel
+    panelBtn?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
@@ -825,11 +826,29 @@ async function initFloatingButton() {
       })
     })
 
+    // Collapse
+    colBtn?.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      isCollapsed = !isCollapsed
+      applyCollapsedState(btn)
+      showToast(isCollapsed ? 'Collapsed — hover to expand' : 'Expanded')
+    })
+
     document.body.appendChild(btn)
+
+    // sync initial mode UI
+    updateModeUI()
+
+    // if mode was restored as active, register listeners
+    if (isActive()) {
+      initGuides()
+      applyInspectorListeners(true)
+    }
   })
 }
 
-// Initialize on load
+// Initialize
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initFloatingButton)
 } else {
@@ -842,21 +861,13 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
     if (changes.language) {
       const lang = changes.language.newValue
-      // Update overlay language
       const overlay = document.getElementById(OVERLAY_ID)
-      if (overlay) {
-        overlay.setAttribute('data-lang', lang || 'en')
-      }
+      if (overlay) overlay.setAttribute('data-lang', lang || 'en')
     }
-    
+
     if (changes.stylesnap_settings) {
       const newSettings = changes.stylesnap_settings.newValue
       if (newSettings) {
-        if (newSettings.assistMode !== undefined) {
-          assistMode = newSettings.assistMode
-          updateAssistModeUI()
-        }
-        
         // Handle floating button visibility toggle
         if (newSettings.showFloatingBtn !== undefined) {
           const btn = document.getElementById(FLOATING_BTN_ID)
@@ -874,12 +885,12 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown }, _sender, sendResponse) => {
   switch (message.type) {
     case 'INIT_INSPECTOR':
-      enableInspector()
+      if (inspectMode === 0) setInspectMode(1)
       sendResponse({ ok: true })
       break
 
     case 'DISABLE_INSPECTOR':
-      disableInspector()
+      setInspectMode(0)
       sendResponse({ ok: true })
       break
 
@@ -916,5 +927,5 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
     default:
       sendResponse({ error: 'Unknown message type' })
   }
-  return true // keep channel open for async responses
+  return true
 })
