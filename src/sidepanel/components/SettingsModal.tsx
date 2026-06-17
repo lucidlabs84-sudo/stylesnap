@@ -355,6 +355,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onLicense
                   value={settings.copySound}
                   onChange={() => handleToggle('copySound')}
                 />
+                <Toggle
+                  label={t('autoOpenSidePanel') || 'Open side panel on inspect'}
+                  value={settings.autoOpenSidePanel ?? true}
+                  onChange={() => handleToggle('autoOpenSidePanel')}
+                />
               </div>
               
               {/* Assist Mode Dropdown */}

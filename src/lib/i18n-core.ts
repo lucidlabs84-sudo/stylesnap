@@ -158,6 +158,7 @@ export const translations = {
     showFloatingBtn: 'Show Floating Button',
     autoInspect: 'Auto-inspect on extension open',
     copySound: 'Copy feedback sound',
+    autoOpenSidePanel: 'Open side panel on inspect',
     // Floating Button Tooltips
     btnTooltip: 'StyleSnap\nClick: Toggle Side Panel\nDrag: Move Button',
     btnInspect: 'Inspect Element',
@@ -299,6 +300,7 @@ export const translations = {
     showFloatingBtn: '显示网页悬浮按钮',
     autoInspect: '打开扩展时自动开启审查',
     copySound: '复制成功提示音',
+    autoOpenSidePanel: '进入审查时打开侧边栏',
     // Floating Button Tooltips
     btnTooltip: 'StyleSnap\n点击：开关侧边栏\n拖拽：移动位置',
     btnInspect: '审查元素',

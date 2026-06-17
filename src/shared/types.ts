@@ -115,24 +115,26 @@ export interface LicenseStatus {
 // ── User Settings ─────────────────────────────────────────────────────────────
 
 export interface UserSettings {
-  theme:       'light' | 'dark' | 'system'
-  defaultTab:  'inspect' | 'export' | 'tokens'
-  showOverlay: boolean
+  theme:            'light' | 'dark' | 'system'
+  defaultTab:       'inspect' | 'export' | 'tokens'
+  showOverlay:      boolean
   showFloatingBtn?: boolean
-  autoInspect: boolean
-  copySound:   boolean
-  assistMode:  0 | 1 | 2  // 0: Off, 1: Guidelines, 2: Grid
-  aiApiKey?:   string
+  autoInspect:      boolean
+  copySound:        boolean
+  assistMode:       0 | 1 | 2  // 0: Off, 1: Guidelines, 2: Grid
+  autoOpenSidePanel?: boolean  // 点击浮动球进入检测模式时是否同时打开侧边栏
+  aiApiKey?:        string
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
-  theme:       'system',
-  defaultTab:  'inspect',
-  showOverlay: true,
-  showFloatingBtn: true,
-  autoInspect: false,
-  copySound:   true,
-  assistMode:  1,
+  theme:            'system',
+  defaultTab:        'inspect',
+  showOverlay:       true,
+  showFloatingBtn:  true,
+  autoInspect:       false,
+  copySound:         true,
+  assistMode:        1,
+  autoOpenSidePanel: true,
 }
 
 export interface StoredData {

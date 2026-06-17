@@ -28,6 +28,7 @@ function showCompareTooltip(_el: Element | null, _x?: number, _y?: number) {}
  */
 let inspectMode = 0
 let lastMode = 0           // 上次使用的模式，仅用于 UI 提示，不自动激活
+let autoOpenSidePanel = true // 点击浮动球进入检测模式时是否同时打开侧边栏
 let lastHighlighted: Element | null = null
 let lockedElement: Element | null = null
 
@@ -774,9 +775,12 @@ async function initFloatingButton() {
     const lang = await detectLang()
     const t = translations[lang] || translations.en
 
-    // restore last used mode for UI hint only (do NOT auto-activate)
+    // restore settings
     if (s.lastUsedMode !== undefined && s.lastUsedMode !== 0) {
       lastMode = s.lastUsedMode as number
+    }
+    if (s.autoOpenSidePanel !== undefined) {
+      autoOpenSidePanel = s.autoOpenSidePanel as boolean
     }
     inspectMode = 0  // always start inactive; user must click to activate
 
@@ -946,32 +950,35 @@ async function initFloatingButton() {
       e.stopPropagation()
       if (hasMoved) return
 
-      // Toggle inspect mode
       if (!isActive()) {
         // Enter inspect mode: restore last used mode (default to 1 = Inspect)
         const modeToRestore = (lastMode > 0 ? lastMode : 1)
         setInspectMode(modeToRestore)
         showToast(`Mode: ${['Off', 'Inspect', 'Guidelines', 'Grid'][modeToRestore]}`)
+
+        // Show floating panel
+        sidePanelOpen = true
+        showPanel(panel!)
+
+        // Open Chrome side panel if setting allows
+        if (autoOpenSidePanel) {
+          chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
+            if (chrome.runtime.lastError) {
+              console.warn('Could not open side panel:', chrome.runtime.lastError.message)
+            }
+          })
+        }
       } else {
-        // Turn off
+        // Exit inspect mode
         setInspectMode(0)
         showToast('Inspector off')
-      }
 
-      // Toggle floating panel visibility
-      sidePanelOpen = !sidePanelOpen
-      if (sidePanelOpen) {
-        showPanel(panel!)
-      } else {
+        // Hide floating panel
+        sidePanelOpen = false
         if (panel) hidePanel(panel)
+        // NOTE: Chrome MV3 does not provide a reliable way to programmatically close
+        // the side panel, so we do NOT send TOGGLE_SIDE_PANEL here.
       }
-
-      // Toggle side panel (Chrome side panel)
-      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
-        if (chrome.runtime.lastError) {
-          console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
-        }
-      })
     })
 
     // Mode buttons → set mode directly
@@ -1032,6 +1039,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
           } else {
             if (btn) btn.remove()
           }
+        }
+
+        // Sync autoOpenSidePanel setting
+        if (newSettings.autoOpenSidePanel !== undefined) {
+          autoOpenSidePanel = newSettings.autoOpenSidePanel
         }
       }
     }
