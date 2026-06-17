@@ -23,6 +23,7 @@ let lastHighlighted: Element | null = null
 let lockedElement: Element | null = null
 
 // derived helpers
+let sidePanelOpen = false
 const isActive = () => inspectMode > 0
 const assistMode = () => (inspectMode >= 2 ? inspectMode - 1 : 0) // 0=off, 1=lines, 2=grid
 
@@ -153,7 +154,7 @@ function getOrCreateOverlay(): HTMLElement {
     chrome.storage.local.get(['language'], (res) => {
       overlay!.setAttribute('data-lang', res.language || 'en')
     })
-    document.body.appendChild(overlay)
+    ;(document.documentElement || document.body).appendChild(overlay)
   }
   return overlay
 }
@@ -262,11 +263,33 @@ function copyLockedCSS() {
 // ─── Event handlers ───────────────────────────────────────────────────
 
 function onMouseMove(e: MouseEvent) {
-  if (!isActive() || lockedElement) return
+  if (!isActive()) return
   const el = document.elementFromPoint(e.clientX, e.clientY)
-  if (!el || el.closest('[data-stylesnap]')) return
+
+  // Bug 5: iframe cross-origin check – skip elements inside iframes
+  if (el && el.ownerDocument !== document) return
+  if (!el || el.closest('[data-stylesnap]')) {
+    removeCompareHighlight()
+    hideCompareTooltip()
+    return
+  }
+
+  // Comparison mode: highlight hovered element while locked
+  if (lockedElement) {
+    if (el === lockedElement) {
+      removeCompareHighlight()
+      hideCompareTooltip()
+      return
+    }
+    highlightCompareElement(el)
+    showCompareTooltip(el, e.clientX, e.clientY)
+    return
+  }
+
   if (el === lastHighlighted) return
 
+  removeCompareHighlight()
+  hideCompareTooltip()
   highlightElement(el)
   const parsedCSS = parseElement(el)
   showOverlay(el, parsedCSS)
@@ -353,14 +376,24 @@ function onKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape' && isActive()) {
     e.preventDefault()
     e.stopPropagation()
+    // Priority: close side panel first, then unlock, then exit inspect mode
+    if (sidePanelOpen) {
+      sidePanelOpen = false
+      const panel = document.getElementById('stylesnap-floating-panel')
+      if (panel) hidePanel(panel)
+      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }).catch(() => {})
+      return
+    }
     if (lockedElement) {
       unlockElement()
+      removeCompareHighlight()
+      hideCompareTooltip()
       chrome.runtime.sendMessage({ type: 'ELEMENT_UNLOCKED' }).catch(() => {})
       hideOverlay()
-    } else {
-      setInspectMode(0)
-      chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
+      return
     }
+    setInspectMode(0)
+    chrome.runtime.sendMessage({ type: 'DISABLE_INSPECTOR' }).catch(() => {})
   }
 }
 
@@ -669,6 +702,28 @@ function injectFloatingBtnStyles() {
       margin: 2px 6px !important;
     }
 
+    /* ── Compare highlight (Bug 3) ── */
+    .stylesnap-compare-highlight {
+      outline: 2px dashed #fbbf24 !important;
+      outline-offset: -1px !important;
+      transition: outline 0.1s ease !important;
+      position: relative !important;
+    }
+    .stylesnap-compare-highlight::after {
+      content: '↔ Compare' !important;
+      position: absolute !important;
+      top: -20px !important;
+      left: 0 !important;
+      background: rgba(251,191,36,0.9) !important;
+      color: #0f172a !important;
+      font-size: 10px !important;
+      font-weight: 700 !important;
+      padding: 2px 6px !important;
+      border-radius: 4px !important;
+      pointer-events: none !important;
+      z-index: 2147483646 !important;
+    }
+
     /* ── Rotate animation ── */
     @keyframes stylesnap-btn-rotate {
       0% { transform: translate(-50%, -50%) rotate(0deg); }
@@ -796,6 +851,23 @@ async function initFloatingButton() {
       }
     })
 
+    // ─── Resize boundary clamp ───
+    window.addEventListener('resize', () => {
+      if (!document.getElementById(FLOATING_BTN_ID)) return
+      const btn = document.getElementById(FLOATING_BTN_ID)!
+      const rect = btn.getBoundingClientRect()
+      const padding = 10, btnSize = 44
+      let right = window.innerWidth - rect.right
+      let bottom = window.innerHeight - rect.bottom
+      right = Math.max(padding, Math.min(right, window.innerWidth - btnSize - padding))
+      bottom = Math.max(padding, Math.min(bottom, window.innerHeight - btnSize - padding))
+      btn.style.setProperty('right', `${right}px`, 'important')
+      btn.style.setProperty('bottom', `${bottom}px`, 'important')
+      chrome.storage.local.set({
+        stylesnap_btn_pos: { right, bottom }
+      })
+    })
+
     // ─── Panel hover persistence ───
     const panel = btn.querySelector('#stylesnap-floating-panel') as HTMLElement | null
 
@@ -812,33 +884,57 @@ async function initFloatingButton() {
       panel.addEventListener('mouseleave', () => hidePanel(panel))
     }
 
+    // Bug 2: Touch support – toggle panel on long-press / tap
+    let touchTimer: number | null = null
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault()
+      touchTimer = window.setTimeout(() => {
+        if (panel) {
+          const isVisible = panel.style.opacity === '1'
+          if (isVisible) {
+            hidePanel(panel)
+            sidePanelOpen = false
+          } else {
+            showPanel(panel)
+            sidePanelOpen = true
+          }
+        }
+      }, 300) // long-press to toggle
+    }, { passive: false })
+    btn.addEventListener('touchend', () => {
+      if (touchTimer) { clearTimeout(touchTimer); touchTimer = null }
+    }, { passive: true })
+    btn.addEventListener('touchmove', () => {
+      if (touchTimer) { clearTimeout(touchTimer); touchTimer = null }
+    }, { passive: true })
+
     // ─── Button actions ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
 
-    // Main ball click → toggle side panel AND close inspect (like Immersive Translate)
+    // Main ball click → toggle side panel
     btnInner?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       if (hasMoved) return
 
-      // If inspect is active, turn it off first (same as clicking the active mode button)
+      sidePanelOpen = !sidePanelOpen
+      if (sidePanelOpen) {
+        showPanel(panel!)
+      } else {
+        if (panel) hidePanel(panel)
+      }
+
+      // If inspect is active, turn it off
       if (isActive()) {
         setInspectMode(0)
         showToast('Inspector off')
-        // Still toggle panel closed
-        chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
-          if (chrome.runtime.lastError) {
-            console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
-          }
-        })
-      } else {
-        // Not active → open side panel
-        chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
-          if (chrome.runtime.lastError) {
-            console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
-          }
-        })
       }
+
+      chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
+        if (chrome.runtime.lastError) {
+          console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
+        }
+      })
     })
 
     // Mode buttons → set mode directly
@@ -863,7 +959,7 @@ async function initFloatingButton() {
       copyLockedCSS()
     })
 
-    document.body.appendChild(btn)
+    document.documentElement.appendChild(btn)
 
     // sync initial mode UI
     updateModeUI()
