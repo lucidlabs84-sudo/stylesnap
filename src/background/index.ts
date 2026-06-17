@@ -55,7 +55,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Directly open the side panel — keeping it synchronous preserves the user gesture context.
       // Chrome MV3 does not provide a reliable way to programmatically close the side panel,
       // so we always call open(). If it is already open, the call is a no-op on most Chrome versions.
-      chrome.sidePanel.open({ tabId, windowId }).catch(console.error)
+      chrome.sidePanel.open({ tabId, windowId }).catch((err) => {
+        console.warn('Side panel open failed:', err)
+        // Notify user via badge
+        try {
+          chrome.action.setBadgeText({ text: '!' })
+          chrome.action.setBadgeBackgroundColor({ color: '#ef4444' })
+          setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000)
+        } catch (_) { /* ignore */ }
+      })
     }
     sendResponse({ ok: true })
     return false
