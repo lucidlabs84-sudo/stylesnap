@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Scan, Package, Palette, Settings, Crown, Languages, MessageSquare, ChevronDown, ChevronRight } from 'lucide-react'
+import { Scan, Package, Palette, Settings, Crown, Languages, MessageSquare } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { clsx } from 'clsx'
 import InspectTab    from './tabs/InspectTab'
@@ -26,57 +26,17 @@ interface ClickedPayload extends HoveredPayload {
   componentCSS?: string
 }
 
-type Section = 'inspect' | 'export' | 'tokens'
+type Tab = 'inspect' | 'export' | 'tokens'
 
-// ─── Section container component ───────────────────────────────────────────
-interface SectionContainerProps {
-  id: Section
-  Icon: LucideIcon
-  title: string
-  isExpanded: boolean
-  onToggle: () => void
-  children: React.ReactNode
-  badge?: string
-  pro?: boolean
-}
-
-const SectionContainer: React.FC<SectionContainerProps> = ({
-  Icon, title, isExpanded, onToggle, children, badge, pro
-}) => {
-  return (
-    <div className="border-b border-slate-800">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-slate-800/50 transition-colors text-left bg-slate-900/30"
-      >
-        <Icon size={13} className={pro ? 'text-amber-400' : 'text-indigo-400'} />
-        <span className="text-xs font-semibold text-gray-200 flex-1">{title}</span>
-        {badge && (
-          <span className="text-[10px] bg-slate-700 text-slate-400 rounded px-1.5 py-0.5 font-mono">
-            {badge}
-          </span>
-        )}
-        {pro && (
-          <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">PRO</span>
-        )}
-        {isExpanded ? (
-          <ChevronDown size={12} className="text-slate-500" />
-        ) : (
-          <ChevronRight size={12} className="text-slate-500" />
-        )}
-      </button>
-      {isExpanded && (
-        <div className="border-t border-slate-800/50">
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
+const TABS: { id: Tab; iconKey: 'inspect' | 'export' | 'tokens'; Icon: LucideIcon }[] = [
+  { id: 'inspect', iconKey: 'inspect', Icon: Scan    },
+  { id: 'export',  iconKey: 'export',  Icon: Package },
+  { id: 'tokens',  iconKey: 'tokens',  Icon: Palette },
+]
 
 function AppContent() {
   const { t, lang, setLang } = useI18n()
-  const [expandedSections, setExpandedSections] = useState<Set<Section>>(new Set(['inspect', 'export', 'tokens']))
+  const [activeTab,      setActiveTab]      = useState<Tab>('inspect')
   const [isInspecting,   setIsInspecting]   = useState(false)
   const [hoveredEl,      setHoveredEl]      = useState<HoveredPayload | null>(null)
   const [clickedEl,      setClickedEl]      = useState<ClickedPayload | null>(null)
@@ -88,10 +48,15 @@ function AppContent() {
   // ── Load license + startup validation + URL detection ───────────────────
   useEffect(() => {
     (async () => {
+      // 1. Check URL for license_key param (from DodoPayments redirect after payment)
       const autoActivated = await checkUrlForLicenseKey()
+
+      // 2. Periodic license validation (every 24h)
       if (!autoActivated) {
         await checkAndValidateLicense()
       }
+
+      // 3. Load current license status
       const status = await getLicenseStatus()
       setLicense(status)
     })()
@@ -110,12 +75,14 @@ function AppContent() {
         sendResponse({ ok: true })
         return false
       }
+
       switch (msg.type) {
         case 'ELEMENT_HOVERED':
           setHoveredEl(msg.payload as HoveredPayload)
           break
         case 'ELEMENT_CLICKED':
           setClickedEl(msg.payload as ClickedPayload)
+          setActiveTab('inspect')
           break
         case 'ELEMENT_UNLOCKED':
           setClickedEl(null)
@@ -138,10 +105,13 @@ function AppContent() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (!tab?.id) return
+      
+      // Cannot inspect chrome:// or restricted URLs
       if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('edge://') || tab.url?.startsWith('about:')) {
         alert(t('cannotInspect'))
         return
       }
+
       if (isInspecting) {
         await chrome.tabs.sendMessage(tab.id, { type: 'DISABLE_INSPECTOR' })
         setIsInspecting(false)
@@ -156,19 +126,6 @@ function AppContent() {
     }
   }, [isInspecting, t])
 
-  // ── Toggle section expanded/collapsed ────────────────────────────────────
-  const toggleSection = (section: Section) => {
-    setExpandedSections(prev => {
-      const next = new Set(prev)
-      if (next.has(section)) {
-        next.delete(section)
-      } else {
-        next.add(section)
-      }
-      return next
-    })
-  }
-
   // Active CSS: prefer clicked element, fall back to hovered
   const currentCSS: ParsedCSS | null =
     clickedEl?.parsedCSS ?? hoveredEl?.parsedCSS ?? null
@@ -177,6 +134,7 @@ function AppContent() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-gray-100">
+
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <header className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-slate-900 shrink-0">
         <div className="flex items-center gap-2">
@@ -201,7 +159,7 @@ function AppContent() {
           {!isPro && (
             <button
               onClick={() => setShowUpgrade(true)}
-              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition-all shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
             >
               <Crown size={10} />
               {t('pro')}
@@ -244,25 +202,36 @@ function AppContent() {
             <span>{t('freeQuota', { used: license.dailyUsed ?? 0, limit: license.dailyLimit })}</span>
             <button
               onClick={() => setShowUpgrade(true)}
-              className="text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
+              className="text-indigo-400 hover:text-indigo-300 transition-colors"
             >
-              {t('upgradeUnlimited')} →
+              {t('upgradeUnlimited')}
             </button>
           </div>
         )}
       </div>
 
-      {/* ── Single scrollable view with collapsible sections ───────────── */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Section 1: Inspect */}
-        <SectionContainer
-          id="inspect"
-          Icon={Scan}
-          title={t('inspect')}
-          isExpanded={expandedSections.has('inspect')}
-          onToggle={() => toggleSection('inspect')}
-          badge={currentCSS ? Math.round((currentCSS.tailwindMatchRate ?? 0) * 100) + '% TW' : undefined}
-        >
+      {/* ── Tabs ────────────────────────────────────────────────────────── */}
+      <div className="flex border-b border-slate-800 shrink-0">
+        {TABS.map(({ id, iconKey, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={clsx(
+              'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors border-b-2',
+              activeTab === id
+                ? 'text-indigo-400 border-indigo-500 bg-indigo-500/5'
+                : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-800/50',
+            )}
+          >
+            <Icon size={12} />
+            {t(iconKey)}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab content ─────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === 'inspect' && (
           <InspectTab
             currentElement={hoveredEl as any}
             clickedElement={clickedEl as any}
@@ -271,39 +240,20 @@ function AppContent() {
             isPro={isPro}
             onUpgrade={() => setShowUpgrade(true)}
           />
-        </SectionContainer>
-
-        {/* Section 2: Export */}
-        <SectionContainer
-          id="export"
-          Icon={Package}
-          title={t('export')}
-          isExpanded={expandedSections.has('export')}
-          onToggle={() => toggleSection('export')}
-          pro={!isPro}
-        >
+        )}
+        {activeTab === 'export' && (
           <ExportTab
             element={currentCSS}
-            componentHTML={clickedEl?.componentHTML ?? undefined}
             license={license ?? { isPro: false, dailyUsed: 0, dailyLimit: 20 }}
             onUpgrade={() => setShowUpgrade(true)}
           />
-        </SectionContainer>
-
-        {/* Section 3: Tokens */}
-        <SectionContainer
-          id="tokens"
-          Icon={Palette}
-          title={t('tokens')}
-          isExpanded={expandedSections.has('tokens')}
-          onToggle={() => toggleSection('tokens')}
-          pro={!isPro}
-        >
+        )}
+        {activeTab === 'tokens' && (
           <TokensTab
             license={license ?? { isPro: false, dailyUsed: 0, dailyLimit: 20 }}
             onUpgrade={() => setShowUpgrade(true)}
           />
-        </SectionContainer>
+        )}
       </div>
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
