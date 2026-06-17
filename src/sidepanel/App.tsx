@@ -38,6 +38,20 @@ function AppContent() {
   const { t, lang, setLang } = useI18n()
   const [activeTab,      setActiveTab]      = useState<Tab>('inspect')
   const [isInspecting,   setIsInspecting]   = useState(false)
+
+  // ── Restore activeTab from storage ─────────────────────────────
+  useEffect(() => {
+    chrome.storage.local.get(['stylesnap_active_tab'], (res) => {
+      if (res.stylesnap_active_tab && ['inspect', 'export', 'tokens'].includes(res.stylesnap_active_tab)) {
+        setActiveTab(res.stylesnap_active_tab as Tab)
+      }
+    })
+  }, [])
+
+  // ── Persist activeTab to storage ──────────────────────────────
+  useEffect(() => {
+    chrome.storage.local.set({ stylesnap_active_tab: activeTab })
+  }, [activeTab])
   const [hoveredEl,      setHoveredEl]      = useState<HoveredPayload | null>(null)
   const [clickedEl,      setClickedEl]      = useState<ClickedPayload | null>(null)
   const [license,        setLicense]        = useState<LicenseStatus | null>(null)

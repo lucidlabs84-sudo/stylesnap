@@ -9,6 +9,14 @@ import { collectAnnotatableElements } from '@/lib/annotator'
 import { detectLang, translations } from '@/lib/i18n-core'
 import type { ParsedCSS } from '@/shared/types'
 
+// ─── Comparison mode stubs (not yet implemented) ─────
+function removeCompareHighlight() {}
+function hideCompareTooltip() {}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function highlightCompareElement(_el: Element | null) {}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function showCompareTooltip(_el: Element | null, _x?: number, _y?: number) {}
+
 // ─── State ────────────────────────────────────────────────────────────
 
 /**
@@ -932,12 +940,25 @@ async function initFloatingButton() {
     // ─── Button actions ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
 
-    // Main ball click → toggle side panel
+    // Main ball click → toggle inspect mode (restore last used mode)
     btnInner?.addEventListener('click', (e) => {
       e.preventDefault()
       e.stopPropagation()
       if (hasMoved) return
 
+      // Toggle inspect mode
+      if (!isActive()) {
+        // Enter inspect mode: restore last used mode (default to 1 = Inspect)
+        const modeToRestore = (lastMode > 0 ? lastMode : 1)
+        setInspectMode(modeToRestore)
+        showToast(`Mode: ${['Off', 'Inspect', 'Guidelines', 'Grid'][modeToRestore]}`)
+      } else {
+        // Turn off
+        setInspectMode(0)
+        showToast('Inspector off')
+      }
+
+      // Toggle floating panel visibility
       sidePanelOpen = !sidePanelOpen
       if (sidePanelOpen) {
         showPanel(panel!)
@@ -945,12 +966,7 @@ async function initFloatingButton() {
         if (panel) hidePanel(panel)
       }
 
-      // If inspect is active, turn it off
-      if (isActive()) {
-        setInspectMode(0)
-        showToast('Inspector off')
-      }
-
+      // Toggle side panel (Chrome side panel)
       chrome.runtime.sendMessage({ type: 'TOGGLE_SIDE_PANEL' }, () => {
         if (chrome.runtime.lastError) {
           console.warn('Could not toggle side panel:', chrome.runtime.lastError.message)
