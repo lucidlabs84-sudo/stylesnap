@@ -190,7 +190,7 @@ export const TokensTab: React.FC<TokensTabProps> = ({ license, onUpgrade }) => {
   // ─── Empty state ─────────────────────────────────────────────────────────
   if (!tokens) {
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col">
         {/* Pro gate */}
         {!isPro && (
           <div className="mx-3 mt-3 flex items-start gap-2 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2.5">
@@ -238,7 +238,7 @@ export const TokensTab: React.FC<TokensTabProps> = ({ license, onUpgrade }) => {
 
   // ─── Token view ───────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       {/* Format + export bar */}
       <div className="flex items-center gap-2 px-3 pt-2 pb-2 border-b border-gray-800">
         <div className="flex gap-1 bg-gray-800 rounded-lg p-0.5 flex-1">

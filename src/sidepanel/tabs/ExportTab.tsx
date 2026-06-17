@@ -11,6 +11,7 @@ import { useI18n } from '@/lib/i18n'
 
 interface ExportTabProps {
   element: ParsedCSS | null
+  componentHTML?: string
   license: LicenseStatus
   onUpgrade: () => void
 }
@@ -25,7 +26,7 @@ const FORMAT_OPTIONS: { value: ExportFormat; label: string; icon: React.ReactNod
   { value: 'css-module',  label: 'CSS Module',     icon: <FileCode2 size={13} />,  pro: false },
 ]
 
-export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrade }) => {
+export const ExportTab: React.FC<ExportTabProps> = ({ element, componentHTML, license, onUpgrade }) => {
   const { t } = useI18n()
   const [format, setFormat]        = useState<ExportFormat>('tailwind')
   const [styleMode, setStyleMode]  = useState<StyleMode>('tailwind')
@@ -123,7 +124,37 @@ export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrad
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
+      {/* Preview */}
+      {element && componentHTML && (
+        <div className="px-3 pt-2 pb-2 border-b border-gray-800">
+          <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Preview</div>
+          <iframe
+            ref={el => {
+              if (!el || !el.contentDocument) return
+              const doc = el.contentDocument
+              const cssText = Object.entries(element.styles)
+                .map(([k, v]) => `  ${k}: ${v};`)
+                .join('\n')
+              const fullCSS = element.selector ? `${element.selector} {\n${cssText}\n}` : cssText
+              doc.open()
+              doc.write(`<!DOCTYPE html>
+<html>
+<head>
+<style>${fullCSS}</style>
+</head>
+<body style="margin:0;padding:8px;background:white;font-family:sans-serif;">
+${componentHTML}
+</body>
+</html>`)
+              doc.close()
+            }}
+            className="w-full h-36 border border-gray-700 rounded-lg bg-white"
+            title="Element Preview"
+          />
+        </div>
+      )}
+
       {/* Format selector */}
       <div className="px-3 pt-2 pb-1">
         <div className="flex gap-1 bg-gray-800/60 rounded-lg p-1">

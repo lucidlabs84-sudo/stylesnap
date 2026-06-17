@@ -9,6 +9,11 @@ import { collectAnnotatableElements } from '@/lib/annotator'
 import { detectLang, translations } from '@/lib/i18n-core'
 import type { ParsedCSS } from '@/shared/types'
 
+// ─── Comparison mode stubs (TODO) ───────────────────────────
+function hideCompareTooltip() {}
+function highlightCompareElement(_el: Element) {}
+function showCompareTooltip(_el: Element, _x: number, _y: number) {}
+
 // ─── State ────────────────────────────────────────────────────────────
 
 /**
@@ -183,10 +188,34 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       <span class="ss-tag">${el.tagName.toLowerCase()}</span>
       <span class="ss-dim">${Math.round(rect.width)}×${Math.round(rect.height)}</span>
       <span class="ss-match">TW ${matchPct}%</span>
+      <button class="ss-copy-btn" style="margin-left:auto;background:rgba(99,102,241,0.8);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;">Copy</button>
     </div>
     ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
     <pre class="ss-css">${cssPreview}</pre>
   `
+
+  // Add click handler for copy button
+  const copyBtn = overlay.querySelector('.ss-copy-btn') as HTMLElement | null
+  if (copyBtn) {
+    copyBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation()
+      const cssText = Object.entries(styles)
+        .map(([k, v]) => `  ${k}: ${v};`)
+        .join('\n')
+      const output = `${el.tagName.toLowerCase()} {\n${cssText}\n}`
+      navigator.clipboard.writeText(output).then(() => {
+        copyBtn.textContent = 'Copied!'
+        copyBtn.style.background = 'rgba(34,197,94,0.8)'
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy'
+          copyBtn.style.background = 'rgba(99,102,241,0.8)'
+        }, 2000)
+      }).catch(() => {
+        copyBtn.textContent = 'Error'
+        setTimeout(() => { copyBtn.textContent = 'Copy' }, 2000)
+      })
+    })
+  }
 
   overlay.style.setProperty('display', 'block', 'important')
   const overlayRect = overlay.getBoundingClientRect()
@@ -275,7 +304,7 @@ function onMouseMove(e: MouseEvent) {
   // Bug 5: iframe cross-origin check – skip elements inside iframes
   if (el && el.ownerDocument !== document) return
   if (!el || el.closest('[data-stylesnap]')) {
-    removeCompareHighlight()
+    removeHighlight()
     hideCompareTooltip()
     return
   }
@@ -283,7 +312,7 @@ function onMouseMove(e: MouseEvent) {
   // Comparison mode: highlight hovered element while locked
   if (lockedElement) {
     if (el === lockedElement) {
-      removeCompareHighlight()
+      removeHighlight()
       hideCompareTooltip()
       return
     }
@@ -294,7 +323,7 @@ function onMouseMove(e: MouseEvent) {
 
   if (el === lastHighlighted) return
 
-  removeCompareHighlight()
+  removeHighlight()
   hideCompareTooltip()
   highlightElement(el)
   const parsedCSS = parseElement(el)
@@ -392,7 +421,7 @@ function onKeyDown(e: KeyboardEvent) {
     }
     if (lockedElement) {
       unlockElement()
-      removeCompareHighlight()
+      removeHighlight()
       hideCompareTooltip()
       chrome.runtime.sendMessage({ type: 'ELEMENT_UNLOCKED' }).catch(() => {})
       hideOverlay()
