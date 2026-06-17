@@ -19,6 +19,7 @@ import type { ParsedCSS } from '@/shared/types'
  *   3 = Grid (all-element outlines)
  */
 let inspectMode = 0
+let lastMode = 0           // 上次使用的模式，仅用于 UI 提示，不自动激活
 let lastHighlighted: Element | null = null
 let lockedElement: Element | null = null
 
@@ -67,11 +68,12 @@ function updateModeUI() {
     badge.style.border = inspectMode === 0 ? '1.5px solid rgba(255,255,255,0.25)' : 'none'
   }
 
-  // mode button group: highlight the active one
+  // mode button group: highlight the active one, hint the last used one
   const modeBtns = btn.querySelectorAll('.stylesnap-mode-btn')
   modeBtns.forEach((b) => {
     const mode = parseInt((b as HTMLElement).dataset.mode || '0', 10)
     b.classList.toggle('is-active', mode === inspectMode)
+    b.classList.toggle('is-preferred', mode === lastMode && inspectMode === 0)
   })
 
   // guides
@@ -94,6 +96,9 @@ function setInspectMode(newMode: number) {
   inspectMode = newMode
   const nowActive = isActive()
 
+  // remember last used mode (for UI hint on next page load)
+  if (newMode > 0) lastMode = newMode
+
   if (!wasActive && nowActive) {
     initGuides()
     applyInspectorListeners(true)
@@ -110,6 +115,7 @@ function setInspectMode(newMode: number) {
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
     const s = res.stylesnap_settings || {}
     s.inspectMode = inspectMode
+    if (newMode > 0) s.lastUsedMode = newMode
     chrome.storage.local.set({ stylesnap_settings: s })
   })
 }
@@ -687,6 +693,20 @@ function injectFloatingBtnStyles() {
     .stylesnap-mode-btn.is-active.mode-inspect { color: #818cf8 !important; background: rgba(99,102,241,0.15) !important; box-shadow: 0 0 0 1px rgba(99,102,241,0.3) !important; }
     .stylesnap-mode-btn.is-active.mode-guidelines { color: #34d399 !important; background: rgba(16,185,129,0.12) !important; box-shadow: 0 0 0 1px rgba(16,185,129,0.3) !important; }
     .stylesnap-mode-btn.is-active.mode-grid { color: #38bdf8 !important; background: rgba(56,189,248,0.12) !important; box-shadow: 0 0 0 1px rgba(56,189,248,0.3) !important; }
+    /* preferred (last used) — subtle hint, NOT active */
+    .stylesnap-mode-btn.is-preferred {
+      box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+    }
+    .stylesnap-mode-btn.is-preferred::after {
+      content: '' !important;
+      position: absolute !important;
+      top: 3px !important;
+      right: 3px !important;
+      width: 5px !important;
+      height: 5px !important;
+      border-radius: 50% !important;
+      background: rgba(255,255,255,0.45) !important;
+    }
     .stylesnap-mode-btn svg {
       width: 14px !important;
       height: 14px !important;
@@ -746,10 +766,11 @@ async function initFloatingButton() {
     const lang = await detectLang()
     const t = translations[lang] || translations.en
 
-    // restore saved mode
-    if (s.inspectMode !== undefined) {
-      inspectMode = s.inspectMode as number
+    // restore last used mode for UI hint only (do NOT auto-activate)
+    if (s.lastUsedMode !== undefined && s.lastUsedMode !== 0) {
+      lastMode = s.lastUsedMode as number
     }
+    inspectMode = 0  // always start inactive; user must click to activate
 
     injectFloatingBtnStyles()
 
@@ -961,14 +982,9 @@ async function initFloatingButton() {
 
     document.documentElement.appendChild(btn)
 
-    // sync initial mode UI
+    // sync initial mode UI (inspectMode is always 0 on load; just render badge)
     updateModeUI()
-
-    // if mode was restored as active, register listeners
-    if (isActive()) {
-      initGuides()
-      applyInspectorListeners(true)
-    }
+    // NOT auto-activating any mode on page load — user must click to activate
   })
 }
 
