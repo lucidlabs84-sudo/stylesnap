@@ -26,7 +26,6 @@
     {
       "matches": ["<all_urls>"],
       "js": ["src/content/index.ts"],
-      "css": ["src/content/overlay.css"],
       "run_at": "document_idle"
     }
   ],
@@ -36,7 +35,8 @@
     "tabs",
     "activeTab",
     "scripting",
-    "clipboardWrite"
+    "clipboardWrite",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -46,7 +46,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/content/overlay.css"],
+      "resources": ["overlay.css"],
       "matches": ["<all_urls>"]
     }
   ]

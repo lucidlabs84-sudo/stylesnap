@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { X, Zap, Check, Star, ArrowRight, ExternalLink, Loader2, AlertCircle, Key } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
+import { createCheckout, activateLicenseKey } from '@/lib/license'
 
 interface UpgradeModalProps {
   onClose: () => void
@@ -36,7 +37,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
     setCheckingOut(true)
     setCheckoutError('')
     try {
-      const { createCheckout } = await import('@/lib/license')
       const url = await createCheckout(email.trim() || undefined)
       // 设置待激活标志，用户支付后回来可以一键激活
       chrome.storage.local.set({ stylesnap_pending_activation: true } as any)
@@ -53,7 +53,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
     setActivating(true)
     setActivateError('')
     try {
-      const { activateLicenseKey } = await import('@/lib/license')
       const result = await activateLicenseKey(licenseKey.trim())
       if (result.success) {
         // 清除待激活标志
