@@ -27,8 +27,8 @@ export default defineConfig({
         headless: false,   // Extensions are easier to debug in headed mode
         launchOptions: {
           args: [
-            `--load-extension=${path.join(__dirname, 'dist')}`,
-            '--disable-extensions-except=' + path.join(__dirname, 'dist'),
+            `--load-extension=${path.resolve('dist')}`,
+            '--disable-extensions-except=' + path.resolve('dist'),
           ],
         },
       },
