@@ -1,11 +1,9 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import {
   Code2, FileCode2, FileType2, Download, Copy, Check,
   Zap, AlertCircle
 } from 'lucide-react'
 import { CodeBlock }    from '../components/CodeBlock'
-import { generateReactComponent, generateVueComponent } from '../../lib/code-generator'
-import { cssToTailwind }   from '../../lib/tailwind-mapper'
 import type { ParsedCSS, LicenseStatus } from '../../shared/types'
 import { useI18n } from '@/lib/i18n'
 
@@ -33,52 +31,43 @@ export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrad
 
   const isPro = license.isPro
 
-  /** Build export output synchronously from current element */
-  const buildOutput = useCallback((): { code: string; language: string } => {
-    if (!element) return { code: '// Select an element to export', language: 'js' }
+  // Web Worker ref for export calculations
+  const workerRef = useRef<Worker | null>(null);
+  const [code, setCode] = useState('// Select an element to export');
+  const [language, setLanguage] = useState('js');
 
-    const { styles, html, selector } = element
-    const cssText = Object.entries(styles)
-      .map(([k, v]) => `  ${k}: ${v};`)
-      .join('\n')
-    const fullCSS = `${selector ?? '.component'} {\n${cssText}\n}`
+  // Initialize Worker and set up message handler
+  useEffect(() => {
+    const worker = new Worker(new URL('../../lib/exportWorker.ts', import.meta.url), { type: 'module' });
+    
+    worker.onmessage = (event: MessageEvent<{ code: string; language: string }>) => {
+      setCode(event.data.code);
+      setLanguage(event.data.language);
+    };
 
-    switch (format) {
-      case 'tailwind': {
-        const { classes, unmatched, matchRate } = cssToTailwind(styles)
-        const unmatchedEntries = Object.entries(unmatched)
-        const unmatchedCSS = unmatchedEntries.length
-          ? `\n/* Unmatched (${(100 - matchRate).toFixed(0)}%): */\n` +
-            unmatchedEntries.map(([k, v]) => `/* ${k}: ${v}; */`).join('\n')
-          : ''
-        return {
-          code: `/* ${matchRate.toFixed(0)}% matched via Tailwind */\n<div className="${classes.join(' ')}">\n  {/* ... */}\n</div>${unmatchedCSS}`,
-          language: 'jsx',
-        }
-      }
-      case 'react':
-        return {
-          code: generateReactComponent(html ?? '<div></div>', fullCSS, { styleMode }),
-          language: 'tsx',
-        }
-      case 'vue':
-        return {
-          code: generateVueComponent(html ?? '<div></div>', fullCSS, { styleMode }),
-          language: 'vue',
-        }
-      case 'css-module': {
-        const className = (selector ?? '.component').replace(/[^a-zA-Z0-9_-]/g, '_').replace(/^_+/, '')
-        const mod = `.${className} {\n${cssText}\n}`
-        const usage = `import styles from './Component.module.css'\n\n<div className={styles.${className}}>\n  {/* ... */}\n</div>`
-        return {
-          code: `${mod}\n\n/* Usage */\n${usage}`,
-          language: 'css',
-        }
-      }
+    workerRef.current = worker;
+
+    return () => {
+      worker.terminate();
+      workerRef.current = null;
+    };
+  }, []);
+
+  // Send export request when inputs change
+  useEffect(() => {
+    if (!element) {
+      setCode('// Select an element to export');
+      setLanguage('js');
+      return;
     }
-  }, [element, format, styleMode])
 
-  const { code, language } = buildOutput()
+    workerRef.current?.postMessage({
+      type: 'export',
+      format,
+      styleMode,
+      element,
+    });
+  }, [element, format, styleMode]);
 
   const handleCopy = async () => {
     try {
