@@ -38,8 +38,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
     try {
       const { createCheckout } = await import('@/lib/license')
       const url = await createCheckout(email.trim() || undefined)
+      // 设置待激活标志，用户支付后回来可以一键激活
+      chrome.storage.local.set({ stylesnap_pending_activation: true } as any)
       chrome.tabs.create({ url })
-      // Switch to activation step so user can enter key after payment
       setStep('activate')
     } catch {
       setCheckoutError(t('checkoutError') || 'Failed to create checkout. Please try again.')
@@ -55,6 +56,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
       const { activateLicenseKey } = await import('@/lib/license')
       const result = await activateLicenseKey(licenseKey.trim())
       if (result.success) {
+        // 清除待激活标志
+        chrome.storage.local.remove('stylesnap_pending_activation')
         onActivated?.()
         onClose()
       } else {
