@@ -1102,13 +1102,3 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
   return true
 })
 
-// ── Initialize immediately ───────────────────────────────────────────────
-;(function() {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      initFloatingButton()
-    })
-  } else {
-    initFloatingButton()
-  }
-})()
