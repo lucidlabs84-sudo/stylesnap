@@ -6,6 +6,7 @@ import {
 import { CodeBlock }    from '../components/CodeBlock'
 import type { ParsedCSS, LicenseStatus } from '../../shared/types'
 import { useI18n } from '@/lib/i18n'
+import { showInfo } from '../../lib/notifications'
 
 interface ExportTabProps {
   element: ParsedCSS | null
@@ -81,6 +82,7 @@ export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrad
       document.body.removeChild(el)
     }
     setCopied(true)
+    showInfo('Code copied to clipboard!')
     setTimeout(() => setCopied(false), 2000)
   }
 

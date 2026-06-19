@@ -16,6 +16,7 @@
 import type { LicenseStatus, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
 import { STORAGE_KEYS, DAILY_FREE_LIMIT, PROXY_BASE_URL } from '@/shared/constants'
+import { showError } from './notifications'
 
 /**
  * Wrapper around fetch() that automatically adds the extension ID header.
@@ -358,6 +359,7 @@ export async function checkAndValidateLicense(): Promise<boolean> {
 
   if (!result.valid) {
     // License revoked — clear Pro status
+    showError('License validation failed — Pro features disabled.')
     await chrome.storage.local.remove(STORAGE_KEYS.LICENSE)
     return false
   }

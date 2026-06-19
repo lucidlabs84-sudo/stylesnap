@@ -3,10 +3,15 @@
  * Handles: side panel behavior, tab communication
  */
 
+import { showInfo } from '../lib/notifications'
+
 // Enable side panel for all tabs
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
     .catch(console.error)
+
+  // Show welcome notification
+  showInfo('StyleSnap installed! Right-click any element to inspect.')
 })
 
 // Message relay between content script and side panel

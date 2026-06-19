@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { X, Zap, Check, Star, ArrowRight, ExternalLink, Loader2, AlertCircle, Key } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 import { createCheckout, activateLicenseKey } from '@/lib/license'
+import { showSuccess } from '@/lib/notifications'
 
 interface UpgradeModalProps {
   onClose: () => void
@@ -57,6 +58,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ onClose, onActivated
       if (result.success) {
         // 清除待激活标志
         chrome.storage.local.remove('stylesnap_pending_activation')
+        showSuccess('License activated successfully!')
         onActivated?.()
         onClose()
       } else {
