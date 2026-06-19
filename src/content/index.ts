@@ -1020,22 +1020,7 @@ export function onExecute(_args: { perf: { injectTime: number; loadTime: number 
   }
 }
 
-// Initialize
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    initFloatingButton()
-    // Call onExecute if this is the initial load (not a dynamic import)
-    if (typeof onExecute === 'function') {
-      onExecute({ perf: { injectTime: performance.now(), loadTime: 0 } })
-    }
-  })
-} else {
-  initFloatingButton()
-  // Call onExecute if this is the initial load (not a dynamic import)
-  if (typeof onExecute === 'function') {
-    onExecute({ perf: { injectTime: performance.now(), loadTime: 0 } })
-  }
-}
+
 
 // ─── Message handling ─────────────────────────────────────────────────
 
@@ -1116,3 +1101,14 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
   }
   return true
 })
+
+// ── Initialize immediately ───────────────────────────────────────────────
+;(function() {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initFloatingButton()
+    })
+  } else {
+    initFloatingButton()
+  }
+})()
