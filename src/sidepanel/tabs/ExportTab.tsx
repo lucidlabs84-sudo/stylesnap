@@ -4,6 +4,7 @@ import {
   Zap, AlertCircle
 } from 'lucide-react'
 import { CodeBlock }    from '../components/CodeBlock'
+import Button           from '../components/Button'
 import type { ParsedCSS, LicenseStatus } from '../../shared/types'
 import { useI18n } from '@/lib/i18n'
 import { showInfo } from '../../lib/notifications'
@@ -121,25 +122,24 @@ export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrad
           {FORMAT_OPTIONS.map(opt => {
             const locked = opt.pro && !isPro
             return (
-              <button
+              <Button
                 key={opt.value}
+                variant="toggle"
+                active={format === opt.value}
+                disabled={locked}
                 onClick={() => {
                   if (locked) { onUpgrade(); return }
                   setFormat(opt.value)
                 }}
                 title={locked ? 'Requires Pro' : opt.label}
-                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded text-[11px] transition-colors relative ${
-                  format === opt.value
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
-                } ${locked ? 'opacity-60' : ''}`}
+                className={locked ? 'opacity-60' : ''}
               >
                 {opt.icon}
                 <span className="hidden sm:inline">{opt.label}</span>
                 {locked && (
                   <Zap size={9} className="text-amber-400 absolute top-0.5 right-0.5" />
                 )}
-              </button>
+              </Button>
             )
           })}
         </div>
@@ -151,17 +151,16 @@ export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrad
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-gray-500 flex-none">{t('style')}</span>
             {(['tailwind', 'cssmodule', 'inline'] as StyleMode[]).map(m => (
-              <button
+              <Button
                 key={m}
+                variant="toggle"
+                size="sm"
+                active={styleMode === m}
                 onClick={() => setStyleMode(m)}
-                className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
-                  styleMode === m
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-gray-400 hover:text-gray-200 bg-gray-800'
-                }`}
+                className="px-2 py-0.5"
               >
                 {m === 'cssmodule' ? 'CSS Module' : m === 'tailwind' ? 'Tailwind' : t('inline')}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -177,12 +176,14 @@ export const ExportTab: React.FC<ExportTabProps> = ({ element, license, onUpgrad
               {t('upgradeToUnlock', { format: FORMAT_OPTIONS.find(o => o.value === format)?.label || '' })}
             </p>
           </div>
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={onUpgrade}
-            className="ml-auto flex-none text-[11px] bg-amber-500 hover:bg-amber-400 text-black font-semibold px-2 py-1 rounded transition-colors"
+            className="ml-auto flex-none bg-amber-500 hover:bg-amber-400 text-black font-semibold"
           >
             {t('upgrade')}
-          </button>
+          </Button>
         </div>
       )}
 

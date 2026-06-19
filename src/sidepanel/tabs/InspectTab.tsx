@@ -4,6 +4,7 @@ import { clsx } from 'clsx'
 import type { ParsedCSS } from '@/shared/types'
 import CodeBlock from '../components/CodeBlock'
 import PropertyRow from '../components/PropertyRow'
+import Button     from '../components/Button'
 import { formatCSS } from '@/lib/css-extractor'
 import { useI18n } from '@/lib/i18n'
 
@@ -128,40 +129,42 @@ export default function InspectTab({
 
       {/* Mode toggle + copy buttons */}
       <div className="flex px-3 py-1.5 gap-2 border-b border-slate-800 shrink-0 items-center">
-        <button
+        <Button
+          variant="tab"
+          active={!showRaw}
           onClick={() => setShowRaw(false)}
-          className={clsx('text-xs px-2 py-0.5 rounded', !showRaw ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-500 hover:text-slate-300')}
         >
           {t('properties')}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="tab"
+          active={showRaw}
           onClick={() => setShowRaw(true)}
-          className={clsx('text-xs px-2 py-0.5 rounded', showRaw ? 'bg-indigo-500/20 text-indigo-400' : 'text-slate-500 hover:text-slate-300')}
         >
           {t('rawCSS')}
-        </button>
+        </Button>
         <div className="ml-auto flex gap-2">
-          <button
+          <Button
+            variant="text"
+            size="sm"
             onClick={() => copyToClipboard(rawCSS, 'css')}
-            className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
           >
             {copiedKey === 'css' ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
             {t('copyCSS')}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="text"
+            size="sm"
             onClick={() => {
               if (!isPro) { onUpgrade(); return }
               copyToClipboard(tailwindClasses.join(' '), 'tw')
             }}
-            className={clsx(
-              'flex items-center gap-1 text-[10px] transition-colors',
-              isPro ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600'
-            )}
+            className={!isPro ? 'text-slate-600' : ''}
           >
             {!isPro && <Lock size={10} />}
             {copiedKey === 'tw' ? <Check size={10} className="text-emerald-400" /> : null}
             {t('copyTW')}
-          </button>
+          </Button>
         </div>
       </div>
 

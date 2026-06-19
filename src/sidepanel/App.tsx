@@ -8,6 +8,7 @@ import TokensTab     from './tabs/TokensTab'
 import SettingsModal from './components/SettingsModal'
 import UpgradeModal  from './components/UpgradeModal'
 import FeedbackModal from './components/FeedbackModal'
+import Button       from './components/Button'
 import type { ParsedCSS, LicenseStatus } from '@/shared/types'
 import { getLicenseStatus, checkAndValidateLicense, checkUrlForLicenseKey } from '@/lib/license'
 import { I18nProvider, useI18n } from '@/lib/i18n'
@@ -163,63 +164,61 @@ function AppContent() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <button
+          <Button
+            variant="icon"
             onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             title={lang === 'zh' ? 'Switch to English' : '切换到中文'}
           >
             <Languages size={14} />
-          </button>
+          </Button>
           {!isPro && (
-            <button
+            <Button
+              variant="secondary"
               onClick={() => setShowUpgrade(true)}
-              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+              className="bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
             >
               <Crown size={10} />
               {t('pro')}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="icon"
             onClick={() => setShowFeedback(true)}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             title={t('feedback')}
           >
             <MessageSquare size={14} />
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="icon"
             onClick={() => setShowSettings(true)}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
             title={t('settings')}
           >
             <Settings size={14} />
-          </button>
+          </Button>
         </div>
       </header>
 
       {/* ── Inspector toggle ─────────────────────────────────────────────── */}
       <div className="px-3 py-2 border-b border-slate-800 bg-slate-900/50 shrink-0">
-        <button
+        <Button
+          variant="primary"
           onClick={toggleInspector}
-          className={clsx(
-            'w-full flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-all',
-            isInspecting
-              ? 'bg-indigo-500 text-white hover:bg-indigo-600 shadow-[0_0_14px_rgba(99,102,241,0.35)]'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700',
-          )}
+          active={isInspecting}
+          className={clsx('w-full', !isInspecting && 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700')}
         >
           <Scan size={14} className={isInspecting ? 'animate-pulse' : ''} />
           {isInspecting ? t('inspecting') : t('startInspecting')}
-        </button>
+        </Button>
 
         {license && !isPro && (
           <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500">
             <span>{t('freeQuota', { used: license.dailyUsed ?? 0, limit: license.dailyLimit })}</span>
-            <button
+            <Button
+              variant="text"
               onClick={() => setShowUpgrade(true)}
-              className="text-indigo-400 hover:text-indigo-300 transition-colors"
             >
               {t('upgradeUnlimited')}
-            </button>
+            </Button>
           </div>
         )}
       </div>
