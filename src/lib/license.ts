@@ -17,6 +17,21 @@ import type { LicenseStatus, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
 import { STORAGE_KEYS, DAILY_FREE_LIMIT, PROXY_BASE_URL } from '@/shared/constants'
 
+/**
+ * Wrapper around fetch() that automatically adds the extension ID header.
+ * This allows the proxy server to verify the request is coming from our extension.
+ */
+async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const mergedOptions: RequestInit = {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      'x-extension-id': chrome.runtime.id || '',
+    },
+  }
+  return fetch(url, mergedOptions)
+}
+
 // ─── Device fingerprint ─────────────────────────────────────────────────────
 
 /** Generate a stable device name from browser info */
@@ -89,7 +104,7 @@ export async function recordUsage(): Promise<boolean> {
  * Returns the hosted checkout URL for the user to complete payment.
  */
 export async function createCheckout(email?: string): Promise<string> {
-  const res = await fetch(`${PROXY_BASE_URL}/api/checkout`, {
+  const res = await proxyFetch(`${PROXY_BASE_URL}/api/checkout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -125,7 +140,7 @@ export async function activateLicenseKey(licenseKey: string): Promise<{
 
   try {
     const deviceName = getDeviceName()
-    const res = await fetch(`${PROXY_BASE_URL}/api/activate`, {
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -178,7 +193,7 @@ export async function validateLicense(licenseKey: string, instanceId?: string): 
       body.instance_id = instanceId
     }
 
-    const res = await fetch(`${PROXY_BASE_URL}/api/validate`, {
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -217,7 +232,7 @@ export async function deactivateLicenseInstance(): Promise<boolean> {
   }
 
   try {
-    const res = await fetch(`${PROXY_BASE_URL}/api/deactivate`, {
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/deactivate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -262,7 +277,7 @@ export async function getLicenseKeyDetails(licenseKeyId: string): Promise<{
 }> {
   try {
     // This calls our proxy's admin endpoint which proxies to DodoPayments
-    const res = await fetch(`${PROXY_BASE_URL}/api/admin/licenses?id=${encodeURIComponent(licenseKeyId)}`, {
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/admin/licenses?id=${encodeURIComponent(licenseKeyId)}`, {
       method: 'GET',
     })
     const data = await res.json()
@@ -287,7 +302,7 @@ export async function activateLicense(email: string): Promise<boolean> {
   if (!emailPattern.test(normalized)) return false
 
   try {
-    const res = await fetch(`${PROXY_BASE_URL}/api/verify`, {
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: normalized }),
