@@ -6,9 +6,22 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Content Script — Floating Ball', () => {
+  // Increase timeout for all tests in this describe
+  test.setTimeout(30000);
+
+  test.beforeEach(async ({ page }) => {
+    // Capture console logs from the page (content script logs will appear here)
+    page.on('console', (msg) => {
+      const text = msg.text();
+      if (text.includes('[StyleSnap]') || text.includes('Error') || text.includes('error')) {
+        console.log(`[PAGE CONSOLE] ${text}`);
+      }
+    });
+  });
+
   test('floating ball appears after page load', async ({ page }) => {
-    // Open a simple HTML page
-    await page.goto('data:text/html,<body><h1>Hello StyleSnap</h1></body>');
+    // Open a simple HTML page from local server
+    await page.goto('http://localhost:8080/test-page.html');
 
     // Wait for the floating ball to appear (content script creates it)
     const floatingBtn = page.locator('#stylesnap-floating-btn');
@@ -16,7 +29,7 @@ test.describe('Content Script — Floating Ball', () => {
   });
 
   test('click floating ball activates inspect mode', async ({ page }) => {
-    await page.goto('data:text/html,<body><h1>Test</h1></body>');
+    await page.goto('http://localhost:8080/test-page.html');
 
     const floatingBtn = page.locator('#stylesnap-floating-btn');
     await expect(floatingBtn).toBeVisible({ timeout: 5000 });
@@ -29,7 +42,7 @@ test.describe('Content Script — Floating Ball', () => {
   });
 
   test('hover element shows highlight', async ({ page }) => {
-    await page.goto('data:text/html,<body><h1>Hover Me</h1></body>');
+    await page.goto('http://localhost:8080/test-page.html');
 
     const floatingBtn = page.locator('#stylesnap-floating-btn');
     await expect(floatingBtn).toBeVisible({ timeout: 5000 });
@@ -47,7 +60,7 @@ test.describe('Content Script — Floating Ball', () => {
   });
 
   test('click element locks it', async ({ page }) => {
-    await page.goto('data:text/html,<body><h1>Lock Me</h1></body>');
+    await page.goto('http://localhost:8080/test-page.html');
 
     const floatingBtn = page.locator('#stylesnap-floating-btn');
     await expect(floatingBtn).toBeVisible({ timeout: 5000 });
@@ -65,7 +78,7 @@ test.describe('Content Script — Floating Ball', () => {
   });
 
   test('press Escape to exit inspect mode', async ({ page }) => {
-    await page.goto('data:text/html,<body><h1>Test</h1></body>');
+    await page.goto('http://localhost:8080/test-page.html');
 
     const floatingBtn = page.locator('#stylesnap-floating-btn');
     await expect(floatingBtn).toBeVisible({ timeout: 5000 });
@@ -82,7 +95,7 @@ test.describe('Content Script — Floating Ball', () => {
   });
 
   test("press 'g' to toggle guidelines mode", async ({ page }) => {
-    await page.goto('data:text/html,<body><h1>Test</h1></body>');
+    await page.goto('http://localhost:8080/test-page.html');
 
     const floatingBtn = page.locator('#stylesnap-floating-btn');
     await expect(floatingBtn).toBeVisible({ timeout: 5000 });
@@ -99,8 +112,8 @@ test.describe('Content Script — Floating Ball', () => {
   });
 
   test('side panel can be opened and shows tabs', async ({ page, context }) => {
-    // Open a simple page
-    await page.goto('data:text/html,<body><h1>Side Panel Test</h1></body>');
+    // Open a simple page from local server
+    await page.goto('http://localhost:8080/test-page.html');
 
     // Wait for floating ball to appear
     const floatingBtn = page.locator('#stylesnap-floating-btn');

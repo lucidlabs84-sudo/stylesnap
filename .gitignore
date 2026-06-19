@@ -38,6 +38,8 @@ push_out.txt
 
 # Test artifacts
 coverage/
+test-results/
+.playwright/
 
 # Generated icons (kept in public/icons/ for manifest; ignore src/assets/icons duplicates)
 src/assets/icons/

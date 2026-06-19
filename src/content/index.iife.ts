@@ -3,6 +3,7 @@
  * Injected into every page. Handles hover detection, CSS extraction,
  * element highlighting, and design token scanning.
  */
+
 import { parseElement, extractComponentCSS, extractComponentHTML } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { collectAnnotatableElements } from '@/lib/annotator'
@@ -1011,11 +1012,29 @@ async function initFloatingButton() {
   })
 }
 
+// Export for @crxjs/vite-plugin loader
+export function onExecute(_args: { perf: { injectTime: number; loadTime: number } }) {
+  // Re-initialize if needed (hot reload)
+  if (!document.getElementById(FLOATING_BTN_ID)) {
+    initFloatingButton()
+  }
+}
+
 // Initialize
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initFloatingButton)
+  document.addEventListener('DOMContentLoaded', () => {
+    initFloatingButton()
+    // Call onExecute if this is the initial load (not a dynamic import)
+    if (typeof onExecute === 'function') {
+      onExecute({ perf: { injectTime: performance.now(), loadTime: 0 } })
+    }
+  })
 } else {
   initFloatingButton()
+  // Call onExecute if this is the initial load (not a dynamic import)
+  if (typeof onExecute === 'function') {
+    onExecute({ perf: { injectTime: performance.now(), loadTime: 0 } })
+  }
 }
 
 // ─── Message handling ─────────────────────────────────────────────────

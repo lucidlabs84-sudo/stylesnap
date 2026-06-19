@@ -14,9 +14,18 @@ export default defineConfig({
   reporter: [['list']],
 
   use: {
+    baseURL: 'http://localhost:8080',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+  },
+
+  // Local server to serve test HTML pages
+  webServer: {
+    command: 'python3 -m http.server 8080',
+    url: 'http://localhost:8080',
+    reuseExistingServer: true,
+    cwd: path.resolve('tests/fixtures'),
   },
 
   projects: [
