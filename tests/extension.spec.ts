@@ -63,4 +63,21 @@ test.describe('Content Script — Floating Ball', () => {
     // Check if the element gets the locked class
     await expect(h1).toHaveClass(/stylesnap-locked/);
   });
+
+  test('press Escape to exit inspect mode', async ({ page }) => {
+    await page.goto('data:text/html,<body><h1>Test</h1></body>');
+
+    const floatingBtn = page.locator('#stylesnap-floating-btn');
+    await expect(floatingBtn).toBeVisible({ timeout: 5000 });
+
+    // Activate inspect mode
+    await floatingBtn.click();
+    await expect(floatingBtn).toHaveClass(/is-active/);
+
+    // Press Escape
+    await page.keyboard.press('Escape');
+
+    // Check if inspect mode deactivates (button loses 'is-active' class)
+    await expect(floatingBtn).not.toHaveClass(/is-active/);
+  });
 });
