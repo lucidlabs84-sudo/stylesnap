@@ -32,11 +32,41 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
   }
 
   try {
-    const { styles, html, selector } = element
+    const { styles, html, selector, responsiveStyles, interactionStyles } = element
+
+    // Build base CSS text
     const cssText = Object.entries(styles)
       .map(([k, v]) => `  ${k}: ${v};`)
       .join('\n')
-    const fullCSS = `${selector ?? '.component'} {\n${cssText}\n}`
+
+    // Build responsive CSS text: Record<string, CSSPropertyMap>
+    let responsiveCSS = ''
+    if (responsiveStyles) {
+      const blocks: string[] = []
+      for (const [query, props] of Object.entries(responsiveStyles)) {
+        const lines = Object.entries(props)
+          .map(([k, v]) => `  ${k}: ${v};`)
+          .join('\n')
+        blocks.push(`@media ${query} {\n${lines}\n}`)
+      }
+      responsiveCSS = blocks.join('\n')
+    }
+
+    // Build interaction (pseudo-class) CSS text: { hover?: CSSPropertyMap; focus?: CSSPropertyMap; active?: CSSPropertyMap }
+    let interactionCSS = ''
+    if (interactionStyles) {
+      const blocks: string[] = []
+      for (const [pseudo, props] of Object.entries(interactionStyles)) {
+        if (!props) continue
+        const lines = Object.entries(props)
+          .map(([k, v]) => `  ${k}: ${v};`)
+          .join('\n')
+        blocks.push(`${pseudo} {\n${lines}\n}`)
+      }
+      interactionCSS = blocks.join('\n')
+    }
+
+    const fullCSS = `${selector ?? '.component'} {\n${cssText}\n}${responsiveCSS ? '\n' + responsiveCSS : ''}${interactionCSS ? '\n' + interactionCSS : ''}`
 
     let code = ''
     let language = 'js'
@@ -54,7 +84,12 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
         break
       }
       case 'react':
-        code = generateReactComponent(html ?? '<div></div>', fullCSS, { styleMode })
+        code = generateReactComponent(html ?? '<div></div>', fullCSS, {
+          styleMode,
+          tailwindClasses: element.tailwindClasses,
+          responsiveClasses: element.responsiveClasses,
+          interactionClasses: element.interactionClasses,
+        })
         language = 'tsx'
         break
       case 'vue':

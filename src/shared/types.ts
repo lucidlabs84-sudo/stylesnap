@@ -15,6 +15,29 @@ export interface ParsedCSS {
   componentCSS?: string
   tailwindClasses?: string[]
   tailwindMatchRate?: number
+
+  // 🆕 Responsive styles (grouped by media query)
+  responsiveStyles?: Record<string, CSSPropertyMap>
+
+  // 🆕 Responsive Tailwind classes (grouped by breakpoint)
+  responsiveClasses?: Record<string, string[]>
+
+  // 🆕 Interaction state styles
+  interactionStyles?: {
+    hover?: CSSPropertyMap
+    focus?: CSSPropertyMap
+    active?: CSSPropertyMap
+  }
+
+  // 🆕 Interaction state Tailwind classes
+  interactionClasses?: {
+    hover?: string[]
+    focus?: string[]
+    active?: string[]
+  }
+
+  // 🆕 Warning messages
+  warnings?: string[]
 }
 
 export interface ElementInfo {

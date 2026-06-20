@@ -1,10 +1,12 @@
 /**
  * CSS Extractor
  * Reads computed styles from DOM elements and cleans browser noise
+ * Now supports hybrid extraction: stylesheet parsing + computed styles fallback
  */
 import { CSSPropertyMap, ParsedCSS } from '@/shared/types'
 import { CSS_KEY_PROPERTIES, CSS_PROPERTIES_TO_SKIP } from '@/shared/constants'
 import { cssToTailwind } from './tailwind-mapper'
+import { parseCSSRules, mergeRules, groupMediaRules, groupPseudoClassRules } from './css-rule-parser'
 
 // Browser default values that are meaningless to show
 const BROWSER_DEFAULTS: CSSPropertyMap = {
@@ -173,19 +175,73 @@ export function formatCSS(styles: CSSPropertyMap, selector = ''): string {
 
 /**
  * Parse an element and return full ParsedCSS
+ * Uses hybrid extraction: tries stylesheet parsing first, falls back to computed styles
  */
 export function parseElement(el: Element): ParsedCSS {
-  const styles = extractComputedCSS(el)
-  const selector = getSelector(el)
-  const { classes, matchRate } = cssToTailwind(styles)
+  // Try using stylesheet parsing
+  const rules = parseCSSRules(el)
 
-  return {
+  let styles: CSSPropertyMap
+  let responsiveStyles: Record<string, CSSPropertyMap> | undefined
+  let interactionStyles: { hover?: CSSPropertyMap; focus?: CSSPropertyMap; active?: CSSPropertyMap } | undefined
+  const warnings: string[] = []
+
+  if (rules.crossOriginWarning) {
+    // Fallback: use computed styles
+    styles = extractComputedCSS(el)
+    warnings.push('Detected cross-origin stylesheets. Some styles may not be fully extracted.')
+  } else {
+    // Use parsed results
+    styles = mergeRules(rules.baseRules)
+
+    // Only use responsive/styles if we got meaningful results
+    const mediaGrouped = groupMediaRules(rules.mediaRules)
+    if (Object.keys(mediaGrouped).length > 0) {
+      responsiveStyles = mediaGrouped
+    }
+
+    const pseudoGrouped = groupPseudoClassRules(rules.pseudoClassRules)
+    if (pseudoGrouped.hover || pseudoGrouped.focus || pseudoGrouped.active) {
+      interactionStyles = pseudoGrouped
+    }
+  }
+
+  // Ensure we have some styles
+  if (Object.keys(styles).length === 0) {
+    styles = extractComputedCSS(el)
+  }
+
+  const selector = getSelector(el)
+
+  // Call cssToTailwind with responsive and interaction styles
+  const tailwindResult = cssToTailwind(styles, responsiveStyles, interactionStyles)
+
+  const result: ParsedCSS = {
     selector,
     styles,
     html: el.outerHTML.slice(0, 500),   // light preview
-    tailwindClasses: classes,
-    tailwindMatchRate: matchRate,
+    tailwindClasses: tailwindResult.classes,
+    tailwindMatchRate: tailwindResult.matchRate,
   }
+
+  // Add new fields if available
+  if (responsiveStyles) {
+    result.responsiveStyles = responsiveStyles
+  }
+  if (tailwindResult.responsiveClasses) {
+    result.responsiveClasses = tailwindResult.responsiveClasses
+  }
+  if (interactionStyles) {
+    result.interactionStyles = interactionStyles
+  }
+  if (tailwindResult.interactionClasses) {
+    result.interactionClasses = tailwindResult.interactionClasses
+  }
+  if (warnings.length > 0) {
+    result.warnings = warnings
+  }
+
+  return result
 }
 
 /**

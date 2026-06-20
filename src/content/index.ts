@@ -188,6 +188,39 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     .map(([k, v]) => `<span class="ss-prop">${k}:</span> <span class="ss-val">${v}</span>`)
     .join('\n')
 
+  // ─── Responsive styles (responsiveStyles) ───
+  let responsiveHTML = ''
+  if (parsedCSS.responsiveStyles) {
+    const lines: string[] = []
+    for (const [query, props] of Object.entries(parsedCSS.responsiveStyles)) {
+      lines.push(`<span class="ss-media">@media ${query}</span> {`)
+      for (const [k, v] of Object.entries(props)) {
+        lines.push(`  <span class="ss-prop">${k}:</span> <span class="ss-val">${v}</span>`)
+      }
+      lines.push(`}`)
+    }
+    if (lines.length > 0) {
+      responsiveHTML = `\n<div class="ss-responsive"><span class="ss-section-title">📱 Responsive</span>\n<pre class="ss-css">${lines.join('\n')}</pre>\n</div>`
+    }
+  }
+
+  // ─── Interaction styles (interactionStyles) ───
+  let interactionHTML = ''
+  if (parsedCSS.interactionStyles) {
+    const lines: string[] = []
+    for (const [pseudo, props] of Object.entries(parsedCSS.interactionStyles)) {
+      if (!props) continue
+      lines.push(`<span class="ss-pseudo">${pseudo}</span> {`)
+      for (const [k, v] of Object.entries(props)) {
+        lines.push(`  <span class="ss-prop">${k}:</span> <span class="ss-val">${v}</span>`)
+      }
+      lines.push(`}`)
+    }
+    if (lines.length > 0) {
+      interactionHTML = `\n<div class="ss-pseudo"><span class="ss-section-title">🖱️ Interaction</span>\n<pre class="ss-css">${lines.join('\n')}</pre>\n</div>`
+    }
+  }
+
   overlay.innerHTML = `
     <div class="ss-header">
       <span class="ss-tag">${el.tagName.toLowerCase()}</span>
@@ -195,7 +228,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       <span class="ss-match">TW ${matchPct}%</span>
     </div>
     ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
-    <pre class="ss-css">${cssPreview}</pre>
+    <pre class="ss-css">${cssPreview}</pre>${responsiveHTML}${interactionHTML}
   `
 
   overlay.style.setProperty('display', 'block', 'important')
@@ -265,10 +298,36 @@ function copyLockedCSS() {
     return
   }
   const parsedCSS = parseElement(lockedElement)
-  const cssText = Object.entries(parsedCSS.styles)
-    .map(([k, v]) => `  ${k}: ${v};`)
-    .join('\n')
-  const output = `${lockedElement.tagName.toLowerCase()} {\n${cssText}\n}`
+  const lines: string[] = []
+
+  // Base styles
+  for (const [k, v] of Object.entries(parsedCSS.styles)) {
+    lines.push(`  ${k}: ${v};`)
+  }
+
+  let output = `${lockedElement.tagName.toLowerCase()} {\n${lines.join('\n')}\n}`
+
+  // Responsive styles: Record<string, CSSPropertyMap>
+  if (parsedCSS.responsiveStyles) {
+    for (const [query, props] of Object.entries(parsedCSS.responsiveStyles)) {
+      const lines = Object.entries(props)
+        .map(([k, v]) => `  ${k}: ${v};`)
+        .join('\n')
+      output += `\n\n@media ${query} {\n${lines}\n}`
+    }
+  }
+
+  // Interaction (pseudo-class) styles: { hover?: CSSPropertyMap; focus?: CSSPropertyMap; active?: CSSPropertyMap }
+  if (parsedCSS.interactionStyles) {
+    for (const [pseudo, props] of Object.entries(parsedCSS.interactionStyles)) {
+      if (!props) continue
+      const lines = Object.entries(props)
+        .map(([k, v]) => `  ${k}: ${v};`)
+        .join('\n')
+      output += `\n\n${pseudo} {\n${lines}\n}`
+    }
+  }
+
   navigator.clipboard.writeText(output).then(() => {
     showToast('CSS copied!')
   }).catch(() => {
@@ -567,22 +626,26 @@ function injectFloatingBtnStyles() {
       position: absolute !important;
       bottom: -1px !important;
       right: -1px !important;
-      width: 18px !important;
-      height: 18px !important;
-      background: transparent !important;
-      border: 1.5px solid rgba(255,255,255,0.25) !important;
+      min-width: 20px !important;
+      height: 16px !important;
+      background: rgba(99,102,241,0.85) !important;
+      border: none !important;
       border-radius: 5px !important;
       display: flex !important;
       align-items: center !important;
       justify-content: center !important;
       z-index: 3 !important;
       pointer-events: none !important;
-      padding: 0 !important;
-      transition: background 0.2s !important;
+      padding: 0 5px !important;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      color: #fff !important;
+      line-height: 1 !important;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
     }
     .stylesnap-mode-badge svg {
-      width: 12px !important;
-      height: 12px !important;
+      width: 11px !important;
+      height: 11px !important;
       color: #fff !important;
     }
 
