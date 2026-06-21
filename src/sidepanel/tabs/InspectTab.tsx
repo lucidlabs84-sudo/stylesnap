@@ -4,7 +4,7 @@ import { clsx } from 'clsx'
 import type { ParsedCSS } from '@/shared/types'
 import CodeBlock from '../components/CodeBlock'
 import PropertyRow from '../components/PropertyRow'
-import Button     from '../components/Button'
+import Button from '../components/Button'
 import { formatCSS } from '@/lib/css-extractor'
 import { useI18n } from '@/lib/i18n'
 
@@ -17,12 +17,12 @@ interface HoveredPayload {
 }
 
 interface InspectTabProps {
-  currentElement:  HoveredPayload | null
-  clickedElement:  (HoveredPayload & { componentHTML?: string; componentCSS?: string }) | null
-  currentCSS:      ParsedCSS | null
-  isInspecting:    boolean
-  isPro:           boolean
-  onUpgrade:       () => void
+  currentElement: HoveredPayload | null
+  clickedElement: (HoveredPayload & { componentHTML?: string; componentCSS?: string }) | null
+  currentCSS: ParsedCSS | null
+  isInspecting: boolean
+  isPro: boolean
+  onUpgrade: () => void
 }
 
 export default function InspectTab({
@@ -34,11 +34,11 @@ export default function InspectTab({
   onUpgrade,
 }: InspectTabProps) {
   const { t } = useI18n()
-  const [showRaw, setShowRaw]         = useState(false)
+  const [showRaw, setShowRaw] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     new Set(['layout', 'typography', 'colors', 'spacing'])
   )
-  const [copiedKey, setCopiedKey]     = useState<string | null>(null)
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
   const element = clickedElement ?? currentElement
 
@@ -70,10 +70,11 @@ export default function InspectTab({
       <div className="flex flex-col items-center justify-center h-full gap-3 text-center p-6">
         <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-indigo-400">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
         </div>
         <p className="text-slate-400 text-sm" dangerouslySetInnerHTML={{ __html: t('emptyInspect1') }}></p>
+        <p className="text-slate-400/70 text-[11px] mt-1">{t('shortcutsHint')}</p>
       </div>
     )
   }
@@ -85,6 +86,7 @@ export default function InspectTab({
           <span className="text-indigo-400 text-lg animate-pulse">◎</span>
         </div>
         <p className="text-slate-400 text-sm">{t('emptyInspect2')}</p>
+        <p className="text-slate-400/70 text-[11px] mt-1">{t('shortcutsHint')}</p>
       </div>
     )
   }
@@ -105,7 +107,7 @@ export default function InspectTab({
             <span className="text-slate-400 font-mono text-xs">#{element.id}</span>
           )}
           {(element?.classList ?? []).length > 0 && (
-            <span className="text-slate-500 font-mono text-xs truncate max-w-[120px]">
+            <span className="text-slate-400 font-mono text-xs truncate max-w-[120px]">
               .{(element!.classList).slice(0, 2).join('.')}
             </span>
           )}
@@ -117,11 +119,11 @@ export default function InspectTab({
               )}
               style={{ width: `${Math.round(tailwindMatchRate * 40)}px`, minWidth: 4 }}
             />
-            <span className="text-slate-500">{Math.round(tailwindMatchRate * 100)}% TW</span>
+            <span className="text-slate-400">{Math.round(tailwindMatchRate * 100)}% TW</span>
           </div>
         </div>
         {element?.rect && (
-          <div className="text-[10px] text-slate-600 mt-0.5">
+          <div className="text-[10px] text-slate-500 mt-0.5">
             {element.rect.width}×{element.rect.height} px
           </div>
         )}
@@ -129,42 +131,36 @@ export default function InspectTab({
 
       {/* Mode toggle + copy buttons */}
       <div className="flex px-3 py-1.5 gap-2 border-b border-slate-800 shrink-0 items-center">
-        <Button
-          variant="tab"
-          active={!showRaw}
-          onClick={() => setShowRaw(false)}
-        >
+        <Button variant="tab" active={!showRaw} onClick={() => setShowRaw(false)}>
           {t('properties')}
         </Button>
-        <Button
-          variant="tab"
-          active={showRaw}
-          onClick={() => setShowRaw(true)}
-        >
+        <Button variant="tab" active={showRaw} onClick={() => setShowRaw(true)}>
           {t('rawCSS')}
         </Button>
         <div className="ml-auto flex gap-2">
-          <Button
-            variant="text"
-            size="sm"
+          <button
             onClick={() => copyToClipboard(rawCSS, 'css')}
+            className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-lg transition-colors font-medium"
           >
-            {copiedKey === 'css' ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
+            {copiedKey === 'css' ? <Check size={13} /> : <Copy size={13} />}
             {t('copyCSS')}
-          </Button>
-          <Button
-            variant="text"
-            size="sm"
+          </button>
+          <button
             onClick={() => {
               if (!isPro) { onUpgrade(); return }
               copyToClipboard(tailwindClasses.join(' '), 'tw')
             }}
-            className={!isPro ? 'text-slate-600' : ''}
+            className={clsx(
+              'flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs rounded-lg transition-colors font-medium',
+              isPro
+                ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+            )}
           >
-            {!isPro && <Lock size={10} />}
-            {copiedKey === 'tw' ? <Check size={10} className="text-emerald-400" /> : null}
+            {!isPro && <Lock size={13} />}
+            {copiedKey === 'tw' ? <Check size={13} /> : null}
             {t('copyTW')}
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -244,11 +240,11 @@ function groupProperties(css: Record<string, string>): Record<string, Record<str
     layout: {}, spacing: {}, typography: {}, colors: {}, borders: {}, effects: {}, other: {},
   }
 
-  const LAYOUT    = new Set(['display', 'position', 'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'flex', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content', 'gap', 'grid', 'grid-template-columns', 'grid-template-rows', 'z-index', 'top', 'right', 'bottom', 'left', 'overflow', 'overflow-x', 'overflow-y'])
-  const SPACING   = new Set(['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'row-gap', 'column-gap'])
-  const TYPO      = new Set(['font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-align', 'text-decoration', 'text-transform', 'white-space'])
-  const COLORS    = new Set(['color', 'background-color', 'background', 'fill', 'stroke', 'border-color'])
-  const BORDERS   = new Set(['border', 'border-top', 'border-right', 'border-bottom', 'border-left', 'border-width', 'border-style', 'border-radius', 'border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius', 'outline'])
+  const LAYOUT  = new Set(['display', 'position', 'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'flex', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content', 'gap', 'grid', 'grid-template-columns', 'grid-template-rows', 'z-index', 'top', 'right', 'bottom', 'left', 'overflow', 'overflow-x', 'overflow-y'])
+  const SPACING = new Set(['margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'row-gap', 'column-gap'])
+  const TYPO    = new Set(['font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-align', 'text-decoration', 'text-transform', 'white-space'])
+  const COLORS  = new Set(['color', 'background-color', 'background', 'fill', 'stroke', 'border-color'])
+  const BORDERS = new Set(['border', 'border-top', 'border-right', 'border-bottom', 'border-left', 'border-width', 'border-style', 'border-radius', 'border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius', 'outline'])
 
   for (const [p, v] of Object.entries(css)) {
     if (LAYOUT.has(p))       groups.layout[p] = v

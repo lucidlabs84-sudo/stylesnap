@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Scan, Package, Palette, Settings, Crown, Languages, MessageSquare } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { Scan, Settings, Crown, Languages, MessageSquare } from 'lucide-react'
 import { clsx } from 'clsx'
 import InspectTab    from './tabs/InspectTab'
-import ExportTab     from './tabs/ExportTab'
-import TokensTab     from './tabs/TokensTab'
 import SettingsModal from './components/SettingsModal'
 import UpgradeModal  from './components/UpgradeModal'
 import FeedbackModal from './components/FeedbackModal'
@@ -27,32 +24,10 @@ interface ClickedPayload extends HoveredPayload {
   componentCSS?: string
 }
 
-type Tab = 'inspect' | 'export' | 'tokens'
-
-const TABS: { id: Tab; iconKey: 'inspect' | 'export' | 'tokens'; Icon: LucideIcon }[] = [
-  { id: 'inspect', iconKey: 'inspect', Icon: Scan    },
-  { id: 'export',  iconKey: 'export',  Icon: Package },
-  { id: 'tokens',  iconKey: 'tokens',  Icon: Palette },
-]
-
 function AppContent() {
   const { t, lang, setLang } = useI18n()
-  const [activeTab,      setActiveTab]      = useState<Tab>('inspect')
   const [isInspecting,   setIsInspecting]   = useState(false)
 
-  // ── Restore activeTab from storage ─────────────────────────────
-  useEffect(() => {
-    chrome.storage.local.get(['stylesnap_active_tab'], (res) => {
-      if (res.stylesnap_active_tab && ['inspect', 'export', 'tokens'].includes(res.stylesnap_active_tab)) {
-        setActiveTab(res.stylesnap_active_tab as Tab)
-      }
-    })
-  }, [])
-
-  // ── Persist activeTab to storage ──────────────────────────────
-  useEffect(() => {
-    chrome.storage.local.set({ stylesnap_active_tab: activeTab })
-  }, [activeTab])
   const [hoveredEl,      setHoveredEl]      = useState<HoveredPayload | null>(null)
   const [clickedEl,      setClickedEl]      = useState<ClickedPayload | null>(null)
   const [license,        setLicense]        = useState<LicenseStatus | null>(null)
@@ -63,21 +38,16 @@ function AppContent() {
   // ── Load license + startup validation + URL detection ───────────────────
   useEffect(() => {
     (async () => {
-      // 1. Check URL for license_key param (from DodoPayments redirect after payment)
       const autoActivated = await checkUrlForLicenseKey()
-
-      // 2. Periodic license validation (every 24h)
       if (!autoActivated) {
         await checkAndValidateLicense()
       }
-
-      // 3. Load current license status
       const status = await getLicenseStatus()
       setLicense(status)
     })()
   }, [])
 
-  // ── Refresh license helper ─────────────────────────────────────────────
+  // ── Refresh license helper ───────────────────────────────────────────────
   const refreshLicense = useCallback(async () => {
     const status = await getLicenseStatus()
     setLicense(status)
@@ -97,7 +67,6 @@ function AppContent() {
           break
         case 'ELEMENT_CLICKED':
           setClickedEl(msg.payload as ClickedPayload)
-          setActiveTab('inspect')
           break
         case 'ELEMENT_UNLOCKED':
           setClickedEl(null)
@@ -120,18 +89,17 @@ function AppContent() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (!tab?.id) return
-      
-      // Cannot inspect chrome:// or restricted URLs
+
       if (tab.url?.startsWith('chrome://') || tab.url?.startsWith('edge://') || tab.url?.startsWith('about:')) {
         alert(t('cannotInspect'))
         return
       }
 
       if (isInspecting) {
-        await chrome.tabs.sendMessage(tab.id, { type: 'DISABLE_INSPECTOR' })
+        await chrome.tabs.sendMessage(tab.id!, { type: 'DISABLE_INSPECTOR' })
         setIsInspecting(false)
       } else {
-        await chrome.tabs.sendMessage(tab.id, { type: 'INIT_INSPECTOR' })
+        await chrome.tabs.sendMessage(tab.id!, { type: 'INIT_INSPECTOR' })
         setIsInspecting(true)
       }
     } catch (err) {
@@ -141,7 +109,6 @@ function AppContent() {
     }
   }, [isInspecting, t])
 
-  // Active CSS: prefer clicked element, fall back to hovered
   const currentCSS: ParsedCSS | null =
     clickedEl?.parsedCSS ?? hoveredEl?.parsedCSS ?? null
 
@@ -211,7 +178,7 @@ function AppContent() {
         </Button>
 
         {license && !isPro && (
-          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500">
+          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
             <span>{t('freeQuota', { used: license.dailyUsed ?? 0, limit: license.dailyLimit })}</span>
             <Button
               variant="text"
@@ -223,56 +190,22 @@ function AppContent() {
         )}
       </div>
 
-      {/* ── Tabs ────────────────────────────────────────────────────────── */}
-      <div className="flex border-b border-slate-800 shrink-0">
-        {TABS.map(({ id, iconKey, Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={clsx(
-              'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors border-b-2',
-              activeTab === id
-                ? 'text-indigo-400 border-indigo-500 bg-indigo-500/5'
-                : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-800/50',
-            )}
-          >
-            <Icon size={12} />
-            {t(iconKey)}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Tab content ─────────────────────────────────────────────────── */}
+      {/* ── Inspect content (directly rendered, no tabs) ─────────────────── */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'inspect' && (
-          <InspectTab
-            currentElement={hoveredEl as any}
-            clickedElement={clickedEl as any}
-            currentCSS={currentCSS}
-            isInspecting={isInspecting}
-            isPro={isPro}
-            onUpgrade={() => setShowUpgrade(true)}
-          />
-        )}
-        {activeTab === 'export' && (
-          <ExportTab
-            element={currentCSS}
-            license={license ?? { isPro: false, dailyUsed: 0, dailyLimit: 20 }}
-            onUpgrade={() => setShowUpgrade(true)}
-          />
-        )}
-        {activeTab === 'tokens' && (
-          <TokensTab
-            license={license ?? { isPro: false, dailyUsed: 0, dailyLimit: 20 }}
-            onUpgrade={() => setShowUpgrade(true)}
-          />
-        )}
+        <InspectTab
+          currentElement={hoveredEl as any}
+          clickedElement={clickedEl as any}
+          currentCSS={currentCSS}
+          isInspecting={isInspecting}
+          isPro={isPro}
+          onUpgrade={() => setShowUpgrade(true)}
+        />
       </div>
 
       {/* ── Modals ──────────────────────────────────────────────────────── */}
       {showSettings && (
-        <SettingsModal 
-          onClose={() => setShowSettings(false)} 
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
           onLicenseChange={refreshLicense}
         />
       )}
