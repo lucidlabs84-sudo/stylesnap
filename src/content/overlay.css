@@ -201,6 +201,68 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   color: #fcd34d;
 }
 
+/* Edit mode */
+#stylesnap-overlay .ss-edit-btn {
+  background: none;
+  border: none;
+  color: #818cf8;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+#stylesnap-overlay .ss-edit-btn:hover {
+  background: rgba(129, 140, 248, 0.15);
+}
+
+#stylesnap-overlay .ss-edit-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+
+#stylesnap-overlay .ss-apply-btn,
+#stylesnap-overlay .ss-cancel-btn {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: none;
+}
+
+#stylesnap-overlay .ss-apply-btn {
+  background: rgba(52, 211, 153, 0.2);
+  color: #34d399;
+}
+#stylesnap-overlay .ss-apply-btn:hover {
+  background: rgba(52, 211, 153, 0.35);
+}
+
+#stylesnap-overlay .ss-cancel-btn {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+#stylesnap-overlay .ss-cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
+#stylesnap-overlay .ss-edit-textarea {
+  width: 100%;
+  min-height: 120px;
+  background: rgba(0,0,0,0.4);
+  color: #e2e8f0;
+  border: 1px solid rgba(129, 140, 248, 0.3);
+  border-radius: 4px;
+  padding: 6px;
+  font-family: inherit;
+  font-size: 10.5px;
+  line-height: 1.6;
+  resize: vertical;
+  tab-size: 2;
+}
+
 /* Element highlight */
 .stylesnap-highlight {
   outline: 2px solid rgba(99, 102, 241, 0.9) !important;

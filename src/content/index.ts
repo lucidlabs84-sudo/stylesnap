@@ -240,9 +240,14 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       <span class="ss-tag">${el.tagName.toLowerCase()}</span>
       <span class="ss-dim">${Math.round(rect.width)}×${Math.round(rect.height)}</span>
       <span class="ss-match">TW ${matchPct}%</span>
+      <button class="ss-edit-btn" title="Edit CSS">✏️</button>
     </div>
     ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
     <pre class="ss-css">${cssPreview}</pre>${responsiveHTML}${interactionHTML}${a11yHTML}
+    <div class="ss-edit-actions" style="display:none;">
+      <button class="ss-cancel-btn">Cancel</button>
+      <button class="ss-apply-btn">Apply</button>
+    </div>
   `
 
   overlay.style.setProperty('display', 'block', 'important')
@@ -264,11 +269,98 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
 
   overlay.style.setProperty('top', `${top}px`, 'important')
   overlay.style.setProperty('left', `${left}px`, 'important')
+
+  // Edit mode button events — use addEventListener so they survive across worlds
+  const bindClick = (sel: string, fn: () => void) => {
+    const b = overlay.querySelector(sel) as HTMLElement | null
+    if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); fn() })
+  }
+  bindClick('.ss-edit-btn', () => enterEditMode())
+  bindClick('.ss-cancel-btn', () => cancelEdit())
+  bindClick('.ss-apply-btn', () => applyEdits())
 }
 
 function hideOverlay() {
   const overlay = document.getElementById(OVERLAY_ID)
   if (overlay) overlay.style.setProperty('display', 'none', 'important')
+}
+
+// ─── Edit mode ─────────────────────────────────────────────────────
+let isEditMode = false
+
+function enterEditMode() {
+  if (isEditMode) return
+  isEditMode = true
+
+  const overlay = document.getElementById(OVERLAY_ID)
+  if (!overlay) return
+
+  const cssPre = overlay.querySelector('.ss-css') as HTMLElement | null
+  if (!cssPre) return
+
+  const currentCSS = cssPre.textContent || ''
+
+  // Create textarea
+  const textarea = document.createElement('textarea')
+  textarea.className = 'ss-edit-textarea'
+  textarea.value = currentCSS
+
+  // Replace pre with textarea
+  cssPre.style.display = 'none'
+  cssPre.parentNode?.insertBefore(textarea, cssPre.nextSibling)
+
+  // Show action buttons
+  const actions = overlay.querySelector('.ss-edit-actions') as HTMLElement | null
+  if (actions) actions.style.display = 'flex'
+}
+
+function applyEdits() {
+  const overlay = document.getElementById(OVERLAY_ID)
+  if (!overlay) return
+
+  const textarea = overlay.querySelector('.ss-edit-textarea') as HTMLTextAreaElement | null
+  const cssPre = overlay.querySelector('.ss-css') as HTMLElement | null
+  const actions = overlay.querySelector('.ss-edit-actions') as HTMLElement | null
+
+  if (!textarea || !cssPre) return
+
+  const newCSS = textarea.value
+  cssPre.textContent = newCSS
+  cssPre.style.display = 'block'
+  textarea.remove()
+
+  if (actions) actions.style.display = 'none'
+  isEditMode = false
+
+  // Apply to locked element
+  if (lockedElement) {
+    const props = newCSS.split('\n').map(l => l.trim()).filter(l => l && l !== '{' && l !== '}')
+    props.forEach(line => {
+      const idx = line.indexOf(':')
+      if (idx > 0) {
+        const prop = line.substring(0, idx).trim()
+        const val = line.substring(idx + 1).replace(';', '').trim()
+        if (prop && val) {
+          ;(lockedElement as HTMLElement).style.setProperty(prop, val)
+        }
+      }
+    })
+    showToast('CSS applied!')
+  }
+}
+
+function cancelEdit() {
+  const overlay = document.getElementById(OVERLAY_ID)
+  if (!overlay) return
+
+  const textarea = overlay.querySelector('.ss-edit-textarea') as HTMLTextAreaElement | null
+  const cssPre = overlay.querySelector('.ss-css') as HTMLElement | null
+  const actions = overlay.querySelector('.ss-edit-actions') as HTMLElement | null
+
+  if (cssPre) cssPre.style.display = 'block'
+  if (textarea) textarea.remove()
+  if (actions) actions.style.display = 'none'
+  isEditMode = false
 }
 
 function highlightElement(el: Element) {
