@@ -87,8 +87,6 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
         code = generateReactComponent(html ?? '<div></div>', fullCSS, {
           styleMode,
           tailwindClasses: element.tailwindClasses,
-          responsiveClasses: element.responsiveClasses,
-          interactionClasses: element.interactionClasses,
         })
         language = 'tsx'
         break

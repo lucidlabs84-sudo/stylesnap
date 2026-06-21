@@ -69,6 +69,7 @@ export const translations = {
     // Inspect Tab
     emptyInspect1: 'Click <strong>Start Inspecting</strong> above<br/>or the floating button on the page<br/>then hover over any element',
     emptyInspect2: 'Hover over an element to inspect it',
+    shortcutsHint: 'Tip: Press <kbd>ESC</kbd> to stop inspecting',
     properties: 'Properties',
     rawCSS: 'Raw CSS',
     copyCSS: 'Copy CSS',
@@ -211,6 +212,7 @@ export const translations = {
     // Inspect Tab
     emptyInspect1: '点击上方的 <strong>开始审查</strong><br/>或者网页右下角的悬浮按钮<br/>然后将鼠标悬停在任意元素上',
     emptyInspect2: '将鼠标悬停在元素上以查看样式',
+    shortcutsHint: '提示：按 <kbd>ESC</kbd> 停止审查',
     properties: '可视属性',
     rawCSS: '原始 CSS',
     copyCSS: '复制 CSS',

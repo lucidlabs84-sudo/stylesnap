@@ -213,8 +213,8 @@ export function parseElement(el: Element): ParsedCSS {
 
   const selector = getSelector(el)
 
-  // Call cssToTailwind with responsive and interaction styles
-  const tailwindResult = cssToTailwind(styles, responsiveStyles, interactionStyles)
+  // Call cssToTailwind (simplified - no responsive/interaction classes)
+  const tailwindResult = cssToTailwind(styles)
 
   const result: ParsedCSS = {
     selector,
@@ -228,14 +228,8 @@ export function parseElement(el: Element): ParsedCSS {
   if (responsiveStyles) {
     result.responsiveStyles = responsiveStyles
   }
-  if (tailwindResult.responsiveClasses) {
-    result.responsiveClasses = tailwindResult.responsiveClasses
-  }
   if (interactionStyles) {
     result.interactionStyles = interactionStyles
-  }
-  if (tailwindResult.interactionClasses) {
-    result.interactionClasses = tailwindResult.interactionClasses
   }
   if (warnings.length > 0) {
     result.warnings = warnings
