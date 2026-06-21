@@ -4,8 +4,11 @@
  * element highlighting, and design token scanning.
  */
 
+import './overlay.css'
+
 import { parseElement, extractComponentCSS, extractComponentHTML } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
+import { checkElementAccessibility } from '@/lib/accessibility-checker'
 import { detectLang, translations } from '@/lib/i18n-core'
 import type { ParsedCSS } from '@/shared/types'
 
@@ -182,6 +185,18 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const tailwindStr = tailwindClasses.slice(0, 8).join(' ') + (tailwindClasses.length > 8 ? ' …' : '')
   const matchPct = Math.round(tailwindMatchRate * 100)
 
+  // ─── Accessibility check ─────────────────────────────
+  const a11yIssues = checkElementAccessibility(el)
+  let a11yHTML = ''
+  if (a11yIssues.length > 0) {
+    const items = a11yIssues.map(issue => {
+      const icon = issue.severity === 'error' ? '❌' : '⚠️'
+      const detail = issue.contrastRatio ? ` (${issue.contrastRatio.toFixed(2)}:1, ${issue.wcagLevel})` : ''
+      return `<div class="ss-a11y-item ss-a11y-${issue.severity}">${icon} ${issue.message}${detail}</div>`
+    }).join('')
+    a11yHTML = `\n<div class="ss-a11y"><span class="ss-section-title">♿ Accessibility</span>\n<div class="ss-a11y-list">${items}</div>\n</div>`
+  }
+
   const cssPreview = Object.entries(styles)
     .slice(0, 8)
     .map(([k, v]) => `<span class="ss-prop">${k}:</span> <span class="ss-val">${v}</span>`)
@@ -227,7 +242,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       <span class="ss-match">TW ${matchPct}%</span>
     </div>
     ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
-    <pre class="ss-css">${cssPreview}</pre>${responsiveHTML}${interactionHTML}
+    <pre class="ss-css">${cssPreview}</pre>${responsiveHTML}${interactionHTML}${a11yHTML}
   `
 
   overlay.style.setProperty('display', 'block', 'important')

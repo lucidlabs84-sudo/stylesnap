@@ -65,6 +65,15 @@ export interface DesignTokens {
   colors: ColorToken[]
 }
 
+// ── Accessibility ───────────────────────────────────
+export interface AccessibilityIssue {
+  type: 'contrast' | 'focus' | 'font-size'
+  severity: 'error' | 'warning'
+  message: string
+  contrastRatio?: number
+  wcagLevel?: 'fail' | 'AA' | 'AAA'
+}
+
 // ── Messaging ─────────────────────────────────────────────────────────────────
 
 export type MessageType =
