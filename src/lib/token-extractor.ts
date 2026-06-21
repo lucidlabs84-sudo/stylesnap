@@ -1,8 +1,8 @@
 /**
- * Design Token Extractor
- * Scans entire page DOM and extracts a structured design token system
+ * Design Token Extractor (Simplified)
+ * Only extracts color palette for the color board
  */
-import type { ColorToken, DesignTokens, TypographyToken, SpacingToken, RadiusToken, ShadowToken } from '@/shared/types'
+import type { ColorToken, DesignTokens } from '@/shared/types'
 
 // ─── Color utilities ─────────────────────────────────────────────────
 
@@ -13,14 +13,14 @@ function rgbToHex(r: number, g: number, b: number): string {
 function parseColor(value: string): { r: number; g: number; b: number; a: number } | null {
   if (!value || value === 'transparent' || value === 'rgba(0, 0, 0, 0)') return null
 
-  let m = value.match(/^rgb\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)\)$/)
-  if (m) return { r: parseFloat(m[1]), g: parseFloat(m[2]), b: parseFloat(m[3]), a: 1 }
+  let m = value.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/)
+  if (m) return { r: parseInt(m[1]), g: parseInt(m[2]), b: parseInt(m[3]), a: 1 }
 
-  m = value.match(/^rgba\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*([\d.]+)\)$/)
+  m = value.match(/^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/)
   if (m) {
     const a = parseFloat(m[4])
     if (a === 0) return null
-    return { r: parseFloat(m[1]), g: parseFloat(m[2]), b: parseFloat(m[3]), a }
+    return { r: parseInt(m[1]), g: parseInt(m[2]), b: parseInt(m[3]), a }
   }
 
   if (value.startsWith('#')) {
@@ -119,20 +119,7 @@ function clusterColors(colors: Array<{ color: { r: number; g: number; b: number;
     })
 }
 
-// ─── Font utilities ───────────────────────────────────────────────────
-
-function normalizeFontFamily(ff: string): string {
-  return ff.split(',')[0].trim().replace(/['"]/g, '')
-}
-
-// ─── Spacing utilities ────────────────────────────────────────────────
-
-function parsePx(val: string): number | null {
-  const m = val.match(/^([\d.]+)px$/)
-  return m ? parseFloat(m[1]) : null
-}
-
-// ─── Main extractor ───────────────────────────────────────────────────
+// ─── Main extractor ──────────────────────────────────────────────────
 
 interface RawColorEntry {
   color: { r: number; g: number; b: number; a: number }
@@ -141,10 +128,6 @@ interface RawColorEntry {
 
 export function extractDesignTokens(): DesignTokens {
   const colorEntries: RawColorEntry[] = []
-  const fontFamilies = new Map<string, { sizes: Map<string, { lh: string; ls: string; count: number }>; weights: Set<string>; count: number }>()
-  const spacingValues = new Map<number, number>()
-  const borderRadiusValues = new Map<number, number>()
-  const shadowValues = new Map<string, number>()
 
   const getSelector = (el: Element): string => {
     if (el.id) return `#${el.id}`
@@ -163,8 +146,8 @@ export function extractDesignTokens(): DesignTokens {
     const computed = window.getComputedStyle(el)
     const selector = getSelector(el)
 
-    // Colors
-    const colorProps = ['color', 'background-color', 'border-color', 'border-top-color', 'border-bottom-color', 'border-left-color', 'border-right-color', 'outline-color', 'fill', 'stroke']
+    // Only extract colors
+    const colorProps = ['color', 'background-color', 'border-color', 'fill', 'stroke']
     for (const prop of colorProps) {
       const val = computed.getPropertyValue(prop)
       if (val) {
@@ -172,212 +155,11 @@ export function extractDesignTokens(): DesignTokens {
         if (parsed) colorEntries.push({ color: parsed, selector })
       }
     }
-
-    // Typography
-    const fontFamily = normalizeFontFamily(computed.fontFamily)
-    const fontSize = computed.fontSize
-    const fontWeight = computed.fontWeight
-    const lineHeight = computed.lineHeight
-    const letterSpacing = computed.letterSpacing
-
-    if (fontFamily && fontSize) {
-      if (!fontFamilies.has(fontFamily)) {
-        fontFamilies.set(fontFamily, { sizes: new Map(), weights: new Set(), count: 0 })
-      }
-      const ff = fontFamilies.get(fontFamily)!
-      ff.count++
-      ff.weights.add(fontWeight)
-      const sizeKey = fontSize
-      if (!ff.sizes.has(sizeKey)) {
-        ff.sizes.set(sizeKey, { lh: lineHeight, ls: letterSpacing, count: 0 })
-      }
-      ff.sizes.get(sizeKey)!.count++
-    }
-
-    // Spacing
-    const spacingProps = ['margin-top', 'margin-right', 'margin-bottom', 'margin-left', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'gap', 'row-gap', 'column-gap']
-    for (const prop of spacingProps) {
-      const val = computed.getPropertyValue(prop)
-      const px = parsePx(val)
-      if (px !== null && px > 0 && px <= 200) {
-        spacingValues.set(px, (spacingValues.get(px) || 0) + 1)
-      }
-    }
-
-    // Border radius
-    const radiusProps = ['border-top-left-radius', 'border-top-right-radius', 'border-bottom-left-radius', 'border-bottom-right-radius']
-    for (const prop of radiusProps) {
-      const val = computed.getPropertyValue(prop)
-      const px = parsePx(val)
-      if (px !== null && px > 0) {
-        borderRadiusValues.set(px, (borderRadiusValues.get(px) || 0) + 1)
-      }
-    }
-
-    // Shadows
-    const shadow = computed.boxShadow
-    if (shadow && shadow !== 'none') {
-      shadowValues.set(shadow, (shadowValues.get(shadow) || 0) + 1)
-    }
   }
 
   // Compile colors
   const colors = clusterColors(colorEntries)
     .slice(0, 20) // Top 20 colors
 
-  // Compile typography
-  const fonts: TypographyToken[] = Array.from(fontFamilies.entries())
-    .sort((a, b) => b[1].count - a[1].count)
-    .map(([ff, data]) => ({
-      family: ff,
-      usageCount: data.count,
-      weights: Array.from(data.weights).sort(),
-      sizes: Array.from(data.sizes.entries())
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, 10)
-        .map(([size]) => size),
-    }))
-
-  // Compile spacing — top values sorted
-  const spacing: SpacingToken[] = Array.from(spacingValues.entries())
-    .filter(([, count]) => count >= 2)
-    .sort((a, b) => a[0] - b[0])
-    .map(([px, count]) => ({ value: `${px}px`, usageCount: count }))
-
-  // Border radius
-  const radii: RadiusToken[] = Array.from(borderRadiusValues.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([px, count]) => ({ value: `${px}px`, usageCount: count }))
-
-  // Shadows
-  const shadows: ShadowToken[] = Array.from(shadowValues.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([value, usageCount]) => ({ value, usageCount }))
-
-  return { colors, fonts, spacing, radii, shadows }
-}
-
-// ─── Export formatters ────────────────────────────────────────────────
-
-export function tokensToJSON(tokens: DesignTokens): string {
-  const output: Record<string, unknown> = {
-    '$schema': 'https://design-tokens.github.io/community-group/format/',
-    colors: {},
-    typography: {},
-    spacing: {},
-    borderRadius: {},
-    shadows: {},
-  }
-
-  // Colors
-  const colors = output.colors as Record<string, unknown>
-  for (const c of tokens.colors) {
-    colors[c.name] = {
-      $value: c.value,
-      $type: 'color',
-      $description: `${c.role} | used ${c.usageCount}×`,
-    }
-  }
-
-  // Typography
-  const typo = output.typography as Record<string, unknown>
-  for (const t of tokens.fonts) {
-    typo[t.family.replace(/\s+/g, '-').toLowerCase()] = {
-      $value: t.family,
-      $type: 'fontFamily',
-      sizes: t.sizes,
-      weights: t.weights,
-    }
-  }
-
-  // Spacing
-  const sp = output.spacing as Record<string, unknown>
-  for (const s of tokens.spacing) {
-    const key = s.name ?? `space-${s.value.replace('px', '')}`
-    sp[key] = { $value: s.value, $type: 'dimension' }
-  }
-
-  // Border radius
-  const br = output.borderRadius as Record<string, unknown>
-  for (const r of tokens.radii) {
-    const key = r.name ?? `radius-${r.value.replace('px', '')}`
-    br[key] = { $value: r.value, $type: 'dimension' }
-  }
-
-  // Shadows
-  const sh = output.shadows as Record<string, unknown>
-  tokens.shadows.forEach((s, i) => {
-    sh[s.name ?? `shadow-${i + 1}`] = { $value: s.value, $type: 'shadow' }
-  })
-
-  return JSON.stringify(output, null, 2)
-}
-
-export function tokensToTailwindConfig(tokens: DesignTokens): string {
-  const colorLines = tokens.colors
-    .map(c => `    '${c.name}': '${c.value}',`)
-    .join('\n')
-
-  const spacingLines = tokens.spacing
-    .map(s => `    '${s.value.replace('px', '')}': '${s.value}',`)
-    .join('\n')
-
-  const fontFamilyLines = tokens.fonts
-    .map(t => `    '${t.family.replace(/\s+/g, '-').toLowerCase()}': ['${t.family}', 'sans-serif'],`)
-    .join('\n')
-
-  const radiusLines = tokens.radii
-    .map(r => `    '${r.value.replace('px', '')}': '${r.value}',`)
-    .join('\n')
-
-  return `/** @type {import('tailwindcss').Config} */
-export default {
-  content: ['./src/**/*.{js,ts,jsx,tsx,html}'],
-  theme: {
-    extend: {
-      colors: {
-${colorLines}
-      },
-      spacing: {
-${spacingLines}
-      },
-      fontFamily: {
-${fontFamilyLines}
-      },
-      borderRadius: {
-${radiusLines}
-      },
-    },
-  },
-  plugins: [],
-}
-`
-}
-
-export function tokensToCSSVariables(tokens: DesignTokens): string {
-  const lines: string[] = [':root {']
-
-  lines.push('  /* ── Colors ── */')
-  tokens.colors.forEach(c => {
-    lines.push(`  --color-${c.name}: ${c.value}; /* ${c.role} */`)
-  })
-
-  lines.push('\n  /* ── Typography ── */')
-  tokens.fonts.forEach((t, i) => {
-    lines.push(`  --font-${i + 1}: '${t.family}';`)
-  })
-
-  lines.push('\n  /* ── Spacing ── */')
-  tokens.spacing.forEach(s => {
-    lines.push(`  --space-${s.value.replace('px', '')}: ${s.value};`)
-  })
-
-  lines.push('\n  /* ── Border Radius ── */')
-  tokens.radii.forEach(r => {
-    lines.push(`  --radius-${r.value.replace('px', '')}: ${r.value};`)
-  })
-
-  lines.push('}')
-  return lines.join('\n')
+  return { colors }
 }

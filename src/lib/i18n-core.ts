@@ -90,6 +90,7 @@ export const translations = {
     extractTokensDesc: 'Scan the current page to extract global colors, fonts, and spacing into standard formats.',
     scanning: 'Scanning page...',
     extractTokensBtn: 'Extract Tokens',
+    colorBoard: 'Color Board',
     // Upgrade Modal
     upgradeModalTitle: 'StyleSnap Pro',
     save: 'Save',
@@ -233,6 +234,7 @@ export const translations = {
     extractTokensDesc: '扫描当前页面，提取颜色、字体、间距等全局设计规范，并导出为标准格式。',
     scanning: '正在扫描页面...',
     extractTokensBtn: '提取设计变量',
+    colorBoard: '颜色板',
     // Upgrade Modal
     upgradeModalTitle: 'StyleSnap 专业版',
     save: '立省',

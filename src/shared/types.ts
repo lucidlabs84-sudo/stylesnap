@@ -60,37 +60,9 @@ export interface ColorToken {
   role: 'primary' | 'secondary' | 'accent' | 'neutral' | 'background' | 'text' | 'border' | 'other'
 }
 
-export interface TypographyToken {
-  family: string
-  sizes: string[]     // ["14px", "16px", …]
-  weights: string[]
-  usageCount: number
-}
-
-export interface SpacingToken {
-  name?: string
-  value: string       // e.g. "8px"
-  usageCount: number
-}
-
-export interface RadiusToken {
-  name?: string
-  value: string       // e.g. "4px"
-  usageCount: number
-}
-
-export interface ShadowToken {
-  name?: string
-  value: string
-  usageCount: number
-}
-
+/** Simplified – only extracts color palette */
 export interface DesignTokens {
-  colors:   ColorToken[]
-  fonts:    TypographyToken[]
-  spacing:  SpacingToken[]
-  radii:    RadiusToken[]
-  shadows:  ShadowToken[]
+  colors: ColorToken[]
 }
 
 // ── Messaging ─────────────────────────────────────────────────────────────────

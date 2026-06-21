@@ -6,7 +6,6 @@
 
 import { parseElement, extractComponentCSS, extractComponentHTML } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
-import { collectAnnotatableElements } from '@/lib/annotator'
 import { detectLang, translations } from '@/lib/i18n-core'
 import type { ParsedCSS } from '@/shared/types'
 
@@ -1149,19 +1148,20 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
       break
     }
 
-    case 'COLLECT_ELEMENTS': {
-      try {
-        const elements = collectAnnotatableElements()
-        sendResponse({ elements })
-      } catch (e: unknown) {
-        sendResponse({ error: (e as Error).message })
-      }
-      break
-    }
-
     default:
       sendResponse({ error: 'Unknown message type' })
   }
   return true
 })
+
+// ─── Debug helpers (Chrome extension tester) ────────────────────────
+;(window as any).debugShowOverlay = (targetSelector: string) => {
+  const el = document.querySelector(targetSelector)
+  if (!el) return 'element not found: ' + targetSelector
+  const parsedCSS = parseElement(el as Element)
+  showOverlay(el as Element, parsedCSS)
+  return 'overlay shown for ' + targetSelector
+}
+
+;(window as any).debugInspectMode = () => inspectMode
 
