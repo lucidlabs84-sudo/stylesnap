@@ -12,10 +12,14 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.7.6",
+    "@preact/signals": "^2.9.2",
     "clsx": "^2.1.1",
     "colord": "^2.9.3",
+    "htm": "^3.1.1",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.456.0",
+    "preact": "^10.29.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

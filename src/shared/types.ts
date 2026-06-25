@@ -126,8 +126,19 @@ export interface UserSettings {
   autoInspect:      boolean
   copySound:        boolean
   assistMode:       0 | 1 | 2  // 0: Off, 1: Guidelines, 2: Grid
-  autoOpenSidePanel?: boolean  // 点击浮动球进入检测模式时是否同时打开侧边栏
   aiApiKey?:        string
+  /** Copy button format: 'css' copies raw CSS, 'tailwind' copies Tailwind classes */
+  copyFormat?:      'css' | 'tailwind'
+  /** Auto-copy CSS to clipboard when locking an element */
+  autoCopyOnLock?:  boolean
+  /** Overlay preferred side: 'right' (default) or 'left' */
+  overlaySide?:     'right' | 'left'
+  /** Show Tailwind classes in the overlay */
+  showTailwindOverlay?: boolean
+  /** Color display format in overlay */
+  colorFormat?:     'rgb' | 'hex' | 'hsl'
+  /** Shorten CSS output: remove unnecessary units, shorten colors, merge shorthand */
+  shortenCSS?:      boolean
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -138,7 +149,12 @@ export const DEFAULT_SETTINGS: UserSettings = {
   autoInspect:       false,
   copySound:         true,
   assistMode:        1,
-  autoOpenSidePanel: true,
+  copyFormat:        'css',
+  autoCopyOnLock:    false,
+  overlaySide:       'right',
+  showTailwindOverlay: true,
+  colorFormat:       'rgb',
+  shortenCSS:        true,
 }
 
 export interface StoredData {

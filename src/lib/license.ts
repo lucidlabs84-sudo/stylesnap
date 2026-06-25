@@ -110,7 +110,7 @@ export async function createCheckout(email?: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email: email?.trim() || undefined,
-      return_url: chrome.runtime?.getURL('sidepanel/index.html') || 'https://lucidlibs.dev/stylesnap/success',
+      return_url: 'https://lucidlibs.dev/stylesnap/success',
       cancel_url: 'https://lucidlibs.dev/stylesnap',
     }),
   })
@@ -338,7 +338,7 @@ const LAST_VALIDATION_KEY = 'stylesnap_last_validation'
 
 /**
  * Checks if it's time to re-validate the license.
- * Call this on extension startup or sidepanel open.
+ * Call this on extension startup.
  * If the license is invalid, revokes Pro status.
  */
 export async function checkAndValidateLicense(): Promise<boolean> {

@@ -211,6 +211,18 @@ export function parseElement(el: Element): ParsedCSS {
     styles = extractComputedCSS(el)
   }
 
+  // Merge inline styles (user edits via overlay) — inline styles override stylesheet values
+  const inline = (el as HTMLElement).style
+  if (inline && inline.length > 0) {
+    for (let i = 0; i < inline.length; i++) {
+      const prop = inline[i]
+      const val = inline.getPropertyValue(prop)
+      if (val && val !== '') {
+        styles[prop] = val
+      }
+    }
+  }
+
   const selector = getSelector(el)
 
   // Call cssToTailwind (simplified - no responsive/interaction classes)
@@ -260,12 +272,45 @@ export function extractComponentCSS(el: Element, maxDepth = 5): string {
   return lines.join('\n\n')
 }
 
+// URL resolution helpers — convert relative paths to absolute
+const URL_ATTRS = new Set(['src', 'href', 'srcset', 'poster', 'data-src', 'action', 'data-href'])
+
+function isExternalUrl(val: string): boolean {
+  return /^(data:|javascript:|mailto:|tel:|#|https?:\/\/)/.test(val)
+}
+
+function resolveUrl(val: string, origin: string): string {
+  if (!val || isExternalUrl(val)) return val
+  if (val.startsWith('//')) return 'https:' + val
+  try { return new URL(val, origin).href } catch { return val }
+}
+
+function resolveSrcset(srcset: string, origin: string): string {
+  return srcset.split(',').map(part => {
+    const trimmed = part.trim()
+    const m = trimmed.match(/^(\S+)(\s+.+)?$/)
+    if (!m) return trimmed
+    return resolveUrl(m[1], origin) + (m[2] || '')
+  }).join(', ')
+}
+
+function resolveAttrUrl(name: string, value: string): string {
+  if (!URL_ATTRS.has(name)) return value
+  try {
+    const base = typeof window !== 'undefined' ? window.location.origin : ''
+    if (!base) return value
+    return name === 'srcset' ? resolveSrcset(value, base) : resolveUrl(value, base)
+  } catch { return value }
+}
+
 /**
  * Get simplified HTML of an element (without scripts, with inline classes)
  */
 export function extractComponentHTML(el: Element, maxDepth = 5): string {
   function cleanNode(node: Element, depth: number): string {
     if (depth > maxDepth) return ''
+    if (node.tagName === 'STYLE' || node.tagName === 'SCRIPT') return '' // skip style/script tags — CSS goes in CSS tab
+    if (node.tagName === 'LINK' && node.getAttribute('rel') === 'stylesheet') return '' // skip link stylesheets
 
     const tag = node.tagName.toLowerCase()
     const id = node.id ? ` id="${node.id}"` : ''
@@ -274,13 +319,13 @@ export function extractComponentHTML(el: Element, maxDepth = 5): string {
       .join(' ')
     const classAttr = classes ? ` class="${classes}"` : ''
 
-    // Copy relevant attributes
+    // Copy relevant attributes (resolve relative URLs → absolute)
     const attrs: string[] = []
     for (const attr of Array.from(node.attributes)) {
       if (['id', 'class', 'style'].includes(attr.name)) continue
       if (attr.name.startsWith('on')) continue // skip event handlers
       if (attr.name.startsWith('data-stylesnap')) continue
-      attrs.push(`${attr.name}="${attr.value}"`)
+      attrs.push(`${attr.name}="${resolveAttrUrl(attr.name, attr.value)}"`)
     }
     const attrStr = attrs.length ? ' ' + attrs.join(' ') : ''
 
@@ -294,13 +339,21 @@ export function extractComponentHTML(el: Element, maxDepth = 5): string {
       .filter(Boolean)
       .join('\n')
 
-    const text = node.childNodes.length === 1 && node.childNodes[0].nodeType === 3
-      ? node.textContent?.trim() || ''
-      : ''
+    // Collect text nodes (even when mixed with child elements)
+    const textNodes = Array.from(node.childNodes)
+      .filter(n => n.nodeType === 3) // TEXT_NODE
+      .map(n => n.textContent?.trim())
+      .filter(Boolean)
+      .join(' ')
+    const text = textNodes || ''
 
     const content = children || text
-
     const indent = '  '.repeat(depth)
+    if (children && text) {
+      // Mixed: children + inline text (like <a><svg/> text</a>)
+      return `${indent}<${tag}${id}${classAttr}${attrStr}>\n${children}\n${text}\n${indent}</${tag}>`
+    }
+
     if (!content) return `${indent}<${tag}${id}${classAttr}${attrStr}></${tag}>`
 
     return `${indent}<${tag}${id}${classAttr}${attrStr}>\n${content}\n${indent}</${tag}>`

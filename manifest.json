@@ -13,10 +13,7 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
     },
-    "default_title": "StyleSnap"
-  },
-  "side_panel": {
-    "default_path": "src/sidepanel/index.html"
+    "default_title": "StyleSnap — Inspect CSS"
   },
   "background": {
     "service_worker": "src/background/index.ts",
@@ -30,13 +27,13 @@
     }
   ],
   "permissions": [
-    "sidePanel",
     "storage",
     "tabs",
     "activeTab",
     "scripting",
     "clipboardWrite",
-    "notifications"
+    "notifications",
+    "contextMenus"
   ],
   "host_permissions": [
     "<all_urls>",

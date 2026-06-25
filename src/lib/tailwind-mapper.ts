@@ -184,17 +184,23 @@ type MappingFn = (value: string) => string | null
 
 function parsePx(val: string): number | null {
   const m = val.match(/^(-?[\d.]+)px$/)
-  return m ? parseFloat(m[1]) : null
+  if (m) return parseFloat(m[1])
+  const rm = val.match(/^(-?[\d.]+)rem$/)
+  if (rm) return parseFloat(rm[1]) * 16
+  const em = val.match(/^(-?[\d.]+)em$/)
+  if (em) return parseFloat(em[1]) * 16
+  return null
 }
 
 // Map pixel values to Tailwind spacing scale
 function spacingClass(prefix: string, val: string): string | null {
-  const px = parsePx(val)
-  if (px === null) return null
-  if (px === 0) return `${prefix}-0`
+  if (val === 'auto') return `${prefix}-auto`
+  if (val === '0' || val === '0px') return `${prefix}-0`
 
-  // Common spacing values
-  const SCALE: Record<number, string> = {
+  const px = parsePx(val)
+  if (px !== null) {
+    if (px === 0) return `${prefix}-0`
+    const SCALE: Record<number, string> = {
     1: 'px',
     2: '0.5',
     4: '1',
@@ -232,6 +238,7 @@ function spacingClass(prefix: string, val: string): string | null {
   }
 
   if (SCALE[px]) return `${prefix}-${SCALE[px]}`
+  }
 
   // Fractional: auto
   if (val === 'auto') return `${prefix}-auto`
@@ -254,6 +261,51 @@ function spacingClass(prefix: string, val: string): string | null {
   return `${prefix}-[${val}]`
 }
 
+// HSL → RGB converter (pure math, no browser APIs — Worker-safe)
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  h = ((h % 360) + 360) % 360
+  s = Math.max(0, Math.min(100, s)) / 100
+  l = Math.max(0, Math.min(100, l)) / 100
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1))
+  const m = l - c / 2
+  let r = 0, g = 0, b = 0
+  if (h < 60)      { r = c; g = x }
+  else if (h < 120) { r = x; g = c }
+  else if (h < 180) { g = c; b = x }
+  else if (h < 240) { g = x; b = c }
+  else if (h < 300) { r = x; b = c }
+  else              { r = c; b = x }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)]
+}
+
+function rgbToHexStr(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map(x => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join('')
+}
+
+// Robust color parser: handles rgb, rgba, hsl, hsla (both legacy & modern syntax)
+function parseColorToHex(val: string): { hex: string; alpha?: number } | null {
+  const patterns: Array<{ re: RegExp; kind: 'rgb' | 'hsl' }> = [
+    { re: /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/, kind: 'rgb' },
+    { re: /^rgba?\(\s*(\d+)\s+(\d+)\s+(\d+)(?:\s*\/\s*([\d.]+))?\s*\)$/, kind: 'rgb' },
+    { re: /^hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%(?:,\s*([\d.]+))?\s*\)$/, kind: 'hsl' },
+    { re: /^hsla?\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%(?:\s*\/\s*([\d.]+))?\s*\)$/, kind: 'hsl' },
+  ]
+  for (const { re, kind } of patterns) {
+    const m = val.match(re)
+    if (!m) continue
+    const aVal = m[4] !== undefined ? parseFloat(m[4]) : undefined
+    const alpha = aVal !== undefined && aVal < 1 ? aVal : undefined
+    if (kind === 'rgb') {
+      return { hex: rgbToHexStr(+m[1], +m[2], +m[3]), alpha }
+    } else {
+      const [r, g, b] = hslToRgb(parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3]))
+      return { hex: rgbToHexStr(r, g, b), alpha }
+    }
+  }
+  return null
+}
+
 // Convert color to Tailwind color class
 function colorClass(prefix: string, val: string): string | null {
   if (!val || val === 'transparent' || val === 'rgba(0, 0, 0, 0)') {
@@ -262,43 +314,33 @@ function colorClass(prefix: string, val: string): string | null {
   if (val === 'currentColor' || val === 'currentcolor') return `${prefix}-current`
   if (val === 'inherit') return `${prefix}-inherit`
 
-  // Convert to hex first
-  let hex: string | null = null
-  
-  // Handle rgb() format
-  const rgb = val.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/)
-  if (rgb) {
-    hex = '#' + [rgb[1], rgb[2], rgb[3]]
-      .map(x => parseInt(x).toString(16).padStart(2, '0')).join('')
-  }
-  
-  // Handle rgba() format (ignore alpha for color matching)
-  const rgba = val.match(/^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/)
-  if (rgba) {
-    hex = '#' + [rgba[1], rgba[2], rgba[3]]
-      .map(x => parseInt(x).toString(16).padStart(2, '0')).join('')
-  }
-  
-  // Handle hsl() format (simplified: convert to hex via temporary element)
-  const hsl = val.match(/^hsl\((\d+),\s*([\d.]+)%,\s*([\d.]+)%\)$/)
-  if (hsl) {
-    // Use browser API to convert (will be handled in content script)
-    // For now, try to match directly
-  }
-  
-  // Handle hex format
-  if (val.startsWith('#')) {
-    hex = normalizeHex(val)
-  }
-  
-  // Try to find closest Tailwind color
-  if (hex) {
-    const twColor = findClosestTailwindColor(hex)
+  // Try parseColorToHex first (handles rgb/rgba/hsl/hsla in all syntaxes)
+  const parsed = parseColorToHex(val)
+  if (parsed) {
+    const twColor = findClosestTailwindColor(parsed.hex)
     if (twColor) {
+      if (parsed.alpha !== undefined) {
+        return `${prefix}-${twColor}/${Math.round(parsed.alpha * 100)}`
+      }
       return `${prefix}-${twColor}`
     }
-    // Fallback to arbitrary value if no close match
+    if (parsed.alpha !== undefined) {
+      return `${prefix}-[${parsed.hex}]/${Math.round(parsed.alpha * 100)}`
+    }
+    return `${prefix}-[${parsed.hex}]`
+  }
+
+  // Handle hex format directly
+  if (val.startsWith('#')) {
+    const hex = normalizeHex(val)
+    const twColor = findClosestTailwindColor(hex)
+    if (twColor) return `${prefix}-${twColor}`
     return `${prefix}-[${hex}]`
+  }
+
+  // Fallback: unrecognized CSS color functions (oklch, display-p3, lab, etc.)
+  if (val.includes('(') && val.includes(')')) {
+    return `${prefix}-[${val.replace(/\s+/g, '_')}]`
   }
 
   return null

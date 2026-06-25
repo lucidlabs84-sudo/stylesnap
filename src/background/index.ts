@@ -1,17 +1,39 @@
 /**
  * Background Service Worker
- * Handles: side panel behavior, tab communication
+ * Handles: toolbar icon toggle, context menu, tab communication
  */
 
 import { showInfo } from '../lib/notifications'
 
-// Enable side panel for all tabs
+// Toolbar icon click → toggle inspect in current tab
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_INSPECT' }).catch(() => {
+      // Ignore — tab may be a restricted page where content script can't run
+    })
+  }
+})
+
+// Set up context menu and welcome notification on install
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
     .catch(console.error)
 
-  // Show welcome notification
-  showInfo('StyleSnap installed! Right-click any element to inspect.')
+  // Right-click toolbar icon → Settings
+  chrome.contextMenus.create({
+    id: 'stylesnap-settings',
+    title: 'Settings',
+    contexts: ['action'],
+  })
+
+  showInfo('StyleSnap installed! Click the toolbar icon to inspect elements.')
+})
+
+// Context menu click
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'stylesnap-settings' && tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'SHOW_SETTINGS' }).catch(() => {})
+  }
 })
 
 // Message relay between content script and side panel
@@ -46,32 +68,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     )
     return true // Keep channel open for async response
-  }
-
-  // Toggle side panel from content script
-  // NOTE: chrome.sidePanel.open() requires a user gesture context.
-  // The message is sent synchronously from a click handler in the content script,
-  // so the call here is still within the gesture window — DO NOT wrap it in
-  // any async callback (e.g. PING round-trip), as that will break the gesture context.
-  if (message.type === 'TOGGLE_SIDE_PANEL') {
-    const tabId = sender.tab?.id
-    const windowId = sender.tab?.windowId
-    if (tabId && windowId) {
-      // Directly open the side panel — keeping it synchronous preserves the user gesture context.
-      // Chrome MV3 does not provide a reliable way to programmatically close the side panel,
-      // so we always call open(). If it is already open, the call is a no-op on most Chrome versions.
-      chrome.sidePanel.open({ tabId, windowId }).catch((err) => {
-        console.warn('Side panel open failed:', err)
-        // Notify user via badge
-        try {
-          chrome.action.setBadgeText({ text: '!' })
-          chrome.action.setBadgeBackgroundColor({ color: '#ef4444' })
-          setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000)
-        } catch (_) { /* ignore */ }
-      })
-    }
-    sendResponse({ ok: true })
-    return false
   }
 
   // Inject/enable inspector, or edit CSS on current tab
