@@ -10,6 +10,11 @@ import { parseElement, extractComponentHTML, extractComponentCSS, formatCSS } fr
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { detectLang, translations, TranslationKey } from '@/lib/i18n-core'
 import { SHADOW_FLOATING_BTN_CSS, SHADOW_HINT_BAR_CSS } from './shadow-styles'
+// Instead of injecting into the global page context via vite/rollup, we inject overlay.css directly into Shadow DOM.
+// We can use a raw import for Vite if we want the raw string, or simply append a link tag.
+// For now, we will import it as raw string using vite's ?raw feature
+import OVERLAY_CSS from './overlay.css?inline'
+
 import { getLicenseStatus, activateLicenseKey, deactivateLicenseInstance, createCheckout } from '@/lib/license'
 import type { ParsedCSS, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
@@ -59,7 +64,7 @@ function getStShadow(): ShadowRoot {
   document.body.appendChild(host)
   _stShadow = host.attachShadow({ mode: 'open' })
   const fbStyle = document.createElement('style')
-  fbStyle.textContent = SHADOW_FLOATING_BTN_CSS + '\n' + SHADOW_HINT_BAR_CSS
+  fbStyle.textContent = SHADOW_FLOATING_BTN_CSS + '\n' + SHADOW_HINT_BAR_CSS + '\n' + OVERLAY_CSS
   _stShadow.appendChild(fbStyle)
   return _stShadow
 }
@@ -921,7 +926,7 @@ function showCompareTooltip(el: Element | null, x?: number, y?: number) {
     white-space: nowrap !important;
     font-family: system-ui, sans-serif !important;
   `
-  document.body.appendChild(tip)
+  stAppend(tip)
   _compareTooltip = tip
 }
 
@@ -1416,7 +1421,7 @@ function showPersistentToast(message: string) {
 }
 
 function showToastImpl(message: string, duration: number) {
-  let toast = document.getElementById('stylesnap-toast')
+  let toast = $$('stylesnap-toast')
   if (!toast) {
     toast = document.createElement('div')
     toast.id = 'stylesnap-toast'
@@ -1439,7 +1444,7 @@ function showToastImpl(message: string, duration: number) {
       boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
       border: '1px solid rgba(255,255,255,0.1)'
     })
-    document.body.appendChild(toast)
+    stAppend(toast)
   }
   toast.textContent = message
   toast.style.opacity = '1'
@@ -1487,7 +1492,7 @@ function toggleShortcutsPanel() {
     </div>
   `
 
-  document.body.appendChild(panel)
+  stAppend(panel)
 
   const closeBtn = panel.querySelector('#ss-shortcuts-close')
   const close = () => panel.remove()
@@ -1575,7 +1580,7 @@ function showPalettePopup() {
 
   // Loading state
   popup.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;">Extracting colors...</div>`
-  document.body.appendChild(popup)
+  stAppend(popup)
 
   // Extract tokens (async via setTimeout to let UI update)
   setTimeout(() => {
@@ -1984,7 +1989,7 @@ function mapCSSToTailwind(styles: CSSStyleDeclaration): string[] {
 }
 
 function showExportMenu(anchor: HTMLElement) {
-  const existing = document.getElementById('stylesnap-export-menu')
+  const existing = $$('stylesnap-export-menu')
   if (existing) { existing.remove(); return }
 
   const el = lockedElement as HTMLElement
@@ -2028,7 +2033,7 @@ function showExportMenu(anchor: HTMLElement) {
     </button>
   `
 
-  document.body.appendChild(menu)
+  stAppend(menu)
 
   // Position menu below anchor (with naive fallback; anchor is the Export button in overlay)
   const anchorRect = anchor.getBoundingClientRect()
@@ -2717,7 +2722,7 @@ function showPreviewPanel(opts: {
   body.appendChild(codeSide)
   panel.appendChild(header)
   panel.appendChild(body)
-  document.body.appendChild(panel)
+  stAppend(panel)
 
   // ─── Render preview ───
   const updatePreview = () => {
@@ -3150,7 +3155,7 @@ async function showSettingsPopup() {
       <kbd>G</kbd> cycle mode &nbsp; <kbd>Esc</kbd> exit
     </div>
   `
-  document.body.appendChild(popup)
+  stAppend(popup)
 
   // Set i18n labels for toggles
   const setLabel = (id: string, key: string) => {
