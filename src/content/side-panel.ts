@@ -62,8 +62,8 @@ export function updateSidePanel(el: HTMLElement, parsedCSS: ParsedCSS | null, ov
     panel.setAttribute('data-stylesnap', 'true')
     Object.assign(panel.style, {
       position: 'fixed', zIndex: '9999990',
-      background: 'rgba(15,23,42,0.97)',
-      border: '1px solid rgba(99,102,241,0.2)',
+      background: 'var(--ss-bg-panel)',
+      border: '1px solid var(--ss-primary-border)',
       borderRadius: '10px', width: '220px',
       boxShadow: '0 4px 24px rgba(0,0,0,0.45)',
       fontFamily: 'system-ui,sans-serif', fontSize: '11px',

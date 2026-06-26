@@ -137,7 +137,7 @@ Requirements:
     ]
     panel.innerHTML = `
       <div id="ss-ai-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999996;"></div>
-      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(660px,92vw);max-height:82vh;background:rgba(15,23,42,0.98);border:1px solid rgba(99,102,241,0.28);border-radius:10px;display:flex;flex-direction:column;z-index:9999997;box-shadow:0 8px 48px rgba(0,0,0,0.55);font-family:system-ui,sans-serif;overflow:hidden;">
+      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(660px,92vw);max-height:82vh;background:var(--ss-bg-card);border:1px solid rgba(99,102,241,0.28);border-radius:10px;display:flex;flex-direction:column;z-index:9999997;box-shadow:0 8px 48px rgba(0,0,0,0.55);font-family:system-ui,sans-serif;overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.06);">
           <div style="display:flex;align-items:center;gap:8px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M12 3 9.2 8.5 3.3 9.6l4.2 4.3-1 6.1 5.5-2.9 5.5 2.9-1-6.1 4.2-4.3-5.9-1.1Z"/></svg>
@@ -149,13 +149,13 @@ Requirements:
           </div>
         </div>
         <div style="display:flex;gap:4px;padding:10px 16px 0;">
-          ${tabs.map(t => `<button data-fw="${t.id}" style="background:${t.id===currentFw ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)'};border:1px solid ${t.id===currentFw ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'};color:${t.id===currentFw ? '#a5b4fc' : '#64748b'};border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.12s;">${t.label}</button>`).join('')}
+          ${tabs.map(t => `<button data-fw="${t.id}" style="background:${t.id===currentFw ? 'var(--ss-primary-border)' : 'rgba(255,255,255,0.04)'};border:1px solid ${t.id===currentFw ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'};color:${t.id===currentFw ? 'var(--ss-primary-lighter)' : '#64748b'};border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.12s;">${t.label}</button>`).join('')}
         </div>
         <div style="flex:1;overflow:auto;padding:10px 16px;">
           <textarea id="ss-ai-textarea" readonly style="width:100%;height:300px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.07);border-radius:6px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.65;padding:10px 12px;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
         </div>
         <div style="padding:10px 16px 14px;display:flex;align-items:center;justify-content:flex-end;border-top:1px solid rgba(255,255,255,0.06);">
-          <button id="ss-ai-copy" style="display:flex;align-items:center;gap:6px;background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.38);color:#a5b4fc;border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;transition:all 0.15s;">${SVG_COPY} Copy Prompt</button>
+          <button id="ss-ai-copy" style="display:flex;align-items:center;gap:6px;background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.38);color:var(--ss-primary-lighter);border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;transition:all 0.15s;">${SVG_COPY} Copy Prompt</button>
         </div>
       </div>
     `

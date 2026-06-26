@@ -25,12 +25,12 @@ export async function showFeedbackModal() {
       <button class="ss-fbm-type" data-type="praise" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">👍 ${t.feedbackPraise || 'Love It'}</button>
       <button class="ss-fbm-type" data-type="bug" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">🐛 ${t.feedbackBug || 'Bug'}</button>
       <button class="ss-fbm-type" data-type="feature" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">💡 ${t.feedbackFeature || 'Request'}</button>
-      <button class="ss-fbm-type" data-type="general" style="flex:1;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);border-radius:5px;color:#a5b4fc;cursor:pointer;font-size:10px;padding:5px 2px;">💬 ${t.feedbackGeneral || 'Other'}</button>
+      <button class="ss-fbm-type" data-type="general" style="flex:1;background:var(--ss-primary-border);border:1px solid rgba(99,102,241,0.3);border-radius:5px;color:var(--ss-primary-lighter);cursor:pointer;font-size:10px;padding:5px 2px;">💬 ${t.feedbackGeneral || 'Other'}</button>
     </div>
     <textarea id="ss-fbm-msg" placeholder="${t.feedbackPlaceholder || 'Tell us what you think…'}" style="width:100%;height:80px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:11px;padding:8px;resize:none;box-sizing:border-box;font-family:system-ui,sans-serif;outline:none;display:block;"></textarea>
     <input id="ss-fbm-email" type="email" placeholder="${t.feedbackEmailPlaceholder || 'Email (optional, for replies)'}" style="width:100%;margin-top:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:11px;padding:7px 8px;box-sizing:border-box;outline:none;display:block;">
-    <button id="ss-fbm-submit" style="margin-top:8px;width:100%;background:#6366f1;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;font-weight:600;padding:9px;transition:opacity 0.15s;">${t.feedbackSubmit || 'Send Feedback'}</button>
-    <div style="font-size:10px;color:#475569;text-align:center;margin-top:8px;">${t.feedbackContactHint || 'Need direct help?'} <a href="mailto:hi@lucidlibs.dev" style="color:#818cf8;text-decoration:none;">hi@lucidlibs.dev</a></div>
+    <button id="ss-fbm-submit" style="margin-top:8px;width:100%;background:var(--ss-primary);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;font-weight:600;padding:9px;transition:opacity 0.15s;">${t.feedbackSubmit || 'Send Feedback'}</button>
+    <div style="font-size:10px;color:#475569;text-align:center;margin-top:8px;">${t.feedbackContactHint || 'Need direct help?'} <a href="mailto:hi@lucidlibs.dev" style="color:var(--ss-primary-light);text-decoration:none;">hi@lucidlibs.dev</a></div>
   `
 
   Object.assign(modal.style, {
@@ -71,8 +71,8 @@ export async function showFeedbackModal() {
         ;(b as HTMLElement).style.color = '#94a3b8'
         ;(b as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'
       })
-      this.style.background = 'rgba(99,102,241,0.2)'
-      this.style.color = '#a5b4fc'
+      this.style.background = 'var(--ss-primary-border)'
+      this.style.color = 'var(--ss-primary-lighter)'
       this.style.borderColor = 'rgba(99,102,241,0.3)'
     })
   })
@@ -157,10 +157,10 @@ export async function showUpgradeModal(trigger?: string) {
       <div style="font-size:22px;font-weight:700;color:#e2e8f0;">$29</div>
       <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${t.oneTime || 'One-time · No subscription · Lifetime access'}</div>
     </div>
-    <button id="ss-upgrade-cta" style="width:100%;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:7px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;padding:11px;transition:opacity 0.15s;margin-bottom:8px;">${t.upgradeToPro || 'Upgrade to Pro — $29'}</button>
+    <button id="ss-upgrade-cta" style="width:100%;background:linear-gradient(135deg,var(--ss-primary),#8b5cf6);border:none;border-radius:7px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;padding:11px;transition:opacity 0.15s;margin-bottom:8px;">${t.upgradeToPro || 'Upgrade to Pro — $29'}</button>
     <div style="display:flex;align-items:center;gap:4px;margin-bottom:10px;">
       <input id="ss-upgrade-key" type="text" placeholder="${t.licenseKeyLabel || 'License Key'} (PRO-XXXX-…)" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:5px;color:#e2e8f0;font-size:11px;padding:7px 8px;outline:none;box-sizing:border-box;">
-      <button id="ss-upgrade-activate" style="background:#1e293b;border:1px solid rgba(99,102,241,0.4);border-radius:5px;color:#818cf8;cursor:pointer;font-size:11px;font-weight:600;padding:7px 10px;white-space:nowrap;">${t.activate || 'Activate'}</button>
+      <button id="ss-upgrade-activate" style="background:#1e293b;border:1px solid rgba(99,102,241,0.4);border-radius:5px;color:var(--ss-primary-light);cursor:pointer;font-size:11px;font-weight:600;padding:7px 10px;white-space:nowrap;">${t.activate || 'Activate'}</button>
     </div>
     <div style="text-align:center;font-size:10px;color:#475569;">
       <span>${t.secure || '🔒 Secure'}</span> · <span>${t.instant || '📧 Instant'}</span> · <span>${t.lifetime || '♾️ Lifetime'}</span>

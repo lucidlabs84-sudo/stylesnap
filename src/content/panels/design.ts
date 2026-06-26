@@ -15,7 +15,7 @@ export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
   Object.assign(popup.style, {
     position: 'fixed',
     zIndex: '999994',
-    background: 'rgba(15, 23, 42, 0.97)',
+    background: 'var(--ss-bg-panel)',
     border: '1px solid rgba(99, 102, 241, 0.3)',
     borderRadius: '10px',
     width: '300px',
@@ -46,8 +46,8 @@ export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
       </div>
       <div id="ss-dpop-color-actions" style="display:none;flex-shrink:0;padding:8px 12px;border-top:1px solid rgba(255,255,255,0.06);">
         <div style="display:flex;gap:6px;">
-          <button id="ss-pal-copy-vars" style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy CSS Vars</button>
-          <button id="ss-pal-copy-json" style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy JSON</button>
+          <button id="ss-pal-copy-vars" style="flex:1;background:var(--ss-primary-bg);border:1px solid rgba(99,102,241,0.3);color:var(--ss-primary-lighter);border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy CSS Vars</button>
+          <button id="ss-pal-copy-json" style="flex:1;background:var(--ss-primary-bg);border:1px solid rgba(99,102,241,0.3);color:var(--ss-primary-lighter);border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy JSON</button>
         </div>
       </div>
     </div>

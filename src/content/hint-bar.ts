@@ -13,7 +13,7 @@ export function showHintBar() {
   bar.setAttribute('data-stylesnap', 'true')
   bar.innerHTML = `
     <style>
-      .ss-hint-logo { font-weight:700; color:#818cf8; margin-right:4px; font-size:12px; }
+      .ss-hint-logo { font-weight:700; color:var(--ss-primary-light); margin-right:4px; font-size:12px; }
       .ss-hint-item { color:#cbd5e1; }
       .ss-hint-item kbd { display:inline-block; background:rgba(255,255,255,0.1); color:#e2e8f0; padding:1px 5px; border-radius:3px; font-size:10px; font-family:monospace; margin-right:2px; border:1px solid rgba(255,255,255,0.08); }
       .ss-hint-sep { color:rgba(255,255,255,0.12); }
@@ -23,7 +23,7 @@ export function showHintBar() {
       .ss-hint-settings:hover { color:rgba(255,255,255,0.85); }
       .ss-hint-settings svg { width:13px; height:13px; }
       .ss-hint-action { background:none; border:1px solid rgba(255,255,255,0.12); border-radius:3px; color:rgba(255,255,255,0.5); cursor:pointer; font-size:10px; padding:2px 6px; margin-left:6px; transition:all 0.15s; white-space:nowrap; }
-      .ss-hint-action:hover { border-color:rgba(99,102,241,0.4); color:#a5b4fc; background:rgba(99,102,241,0.1); }
+      .ss-hint-action:hover { border-color:rgba(99,102,241,0.4); color:var(--ss-primary-lighter); background:var(--ss-primary-bg); }
     </style>
     <span class="ss-hint-logo">StyleSnap</span>
     <span class="ss-hint-item"><kbd>↑↓←→</kbd> DOM</span>

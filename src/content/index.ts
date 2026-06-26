@@ -902,7 +902,7 @@ function showCompareTooltip(el: Element | null, x?: number, y?: number) {
     left: ${x ?? 0}px !important;
     top: ${(y ?? 0) - 28}px !important;
     background: rgba(251,191,36,0.95) !important;
-    color: #0f172a !important;
+    color: var(--ss-bg-deep) !important;
     font-size: 10px !important;
     font-weight: 700 !important;
     padding: 3px 8px !important;

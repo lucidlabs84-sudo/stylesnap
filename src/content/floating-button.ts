@@ -44,7 +44,7 @@ function injectFloatingBtnStyles() {
       justify-content: center !important;
       width: 44px !important;
       height: 44px !important;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+      background: linear-gradient(135deg, var(--ss-primary), #8b5cf6) !important;
       border-radius: 50% !important;
       z-index: 2 !important;
       box-sizing: border-box !important;
@@ -56,7 +56,7 @@ function injectFloatingBtnStyles() {
       transform: scale(1.06) translateY(-2px) !important;
     }
     #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
-      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+      background: linear-gradient(135deg, var(--ss-primary), #8b5cf6) !important;
       box-shadow: 0 4px 14px rgba(99, 102, 241, 0.55) !important;
     }
 
@@ -85,21 +85,21 @@ function injectFloatingBtnStyles() {
         transparent 0deg,
         rgba(99, 102, 241, 0.15) 20deg,
         rgba(99, 102, 241, 0.5) 30deg,
-        #818cf8 36deg,
+        var(--ss-primary-light) 36deg,
         #a78bfa 42deg,
         rgba(139, 92, 246, 0.5) 48deg,
         transparent 60deg,
         transparent 130deg,
         rgba(99, 102, 241, 0.15) 140deg,
         rgba(99, 102, 241, 0.5) 150deg,
-        #818cf8 156deg,
+        var(--ss-primary-light) 156deg,
         #a78bfa 162deg,
         rgba(139, 92, 246, 0.5) 168deg,
         transparent 180deg,
         transparent 250deg,
         rgba(99, 102, 241, 0.15) 260deg,
         rgba(99, 102, 241, 0.5) 270deg,
-        #818cf8 276deg,
+        var(--ss-primary-light) 276deg,
         #a78bfa 282deg,
         rgba(139, 92, 246, 0.5) 288deg,
         transparent 300deg,
@@ -143,7 +143,7 @@ function injectFloatingBtnStyles() {
       width: 26px !important;
       height: 26px !important;
       background: #fff !important;
-      color: #6366f1 !important;
+      color: var(--ss-primary) !important;
       border-radius: 8px !important;
       display: flex !important;
       align-items: center !important;
@@ -335,7 +335,7 @@ export async function initFloatingButton() {
         zIndex: '9999993',
         bottom: '74px',
         right: '24px',
-        background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+        background: 'linear-gradient(135deg,var(--ss-primary),#8b5cf6)',
         color: '#fff',
         padding: '8px 14px',
         borderRadius: '8px',

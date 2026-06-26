@@ -15,7 +15,7 @@ export function showHistoryPanel() {
   Object.assign(popup.style, {
     position: 'fixed',
     zIndex: '999994',
-    background: 'rgba(15, 23, 42, 0.97)',
+    background: 'var(--ss-bg-panel)',
     border: '1px solid rgba(99, 102, 241, 0.3)',
     borderRadius: '10px',
     padding: '12px',
@@ -51,7 +51,7 @@ export function showHistoryPanel() {
     return S.history.map((item, i) => `
       <div class="ss-history-item" data-idx="${i}" style="margin-bottom:6px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);cursor:pointer;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:600;font-size:11px;color:#a5b4fc;">&lt;${item.tag}&gt;</span>
+          <span style="font-weight:600;font-size:11px;color:var(--ss-primary-lighter);">&lt;${item.tag}&gt;</span>
           <span style="font-size:10px;color:#64748b;">${timeAgo(item.timestamp)}</span>
         </div>
         <div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.selector}</div>

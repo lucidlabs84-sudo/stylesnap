@@ -20,7 +20,7 @@ export async function showSettingsPopup() {
   Object.assign(popup.style, {
     position: 'fixed',
     zIndex: '999994',
-    background: 'rgba(15, 23, 42, 0.97)',
+    background: 'var(--ss-bg-panel)',
     border: '1px solid rgba(99, 102, 241, 0.3)',
     borderRadius: '10px',
     padding: '14px',
@@ -74,7 +74,7 @@ export async function showSettingsPopup() {
 
 
   const inputStyle = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:5px 8px;color:#e2e8f0;font-size:11px;width:100%;box-sizing:border-box;'
-  const btnStyle = 'background:#6366f1;border:none;border-radius:4px;padding:5px 10px;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;'
+  const btnStyle = 'background:var(--ss-primary);border:none;border-radius:4px;padding:5px 10px;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;'
   const secondaryBtnStyle = 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:5px 10px;color:#e2e8f0;font-size:11px;cursor:pointer;white-space:nowrap;'
   const sectionStyle = 'margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);'
 
@@ -95,7 +95,7 @@ export async function showSettingsPopup() {
   const iconSlider  = `<svg ${svg14i}><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></svg>`
   const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.04);border-radius:6px;padding:2px;margin-left:auto;'
   const chipStyle = 'background:transparent;border:none;color:#94a3b8;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;transition:all 0.12s;'
-  const chipActiveStyle = 'background:rgba(99,102,241,0.2);color:#e2e8f0;'
+  const chipActiveStyle = 'background:var(--ss-primary-border);color:#e2e8f0;'
 
   // Reusable chip group helper
   const chipGroup = (idBase: string, options: {value: string; label: string}[], selected: string) => {
@@ -112,7 +112,7 @@ export async function showSettingsPopup() {
       <div style="position:relative;width:36px;height:20px;flex:none;">
         <input id="${id}" type="checkbox" ${checked ? 'checked' : ''}
           style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;z-index:1;margin:0;">
-        <div style="width:36px;height:20px;border-radius:10px;background:${checked ? '#6366f1' : 'rgba(255,255,255,0.12)'};transition:background 0.15s;display:flex;align-items:center;padding:2px;">
+        <div style="width:36px;height:20px;border-radius:10px;background:${checked ? 'var(--ss-primary)' : 'rgba(255,255,255,0.12)'};transition:background 0.15s;display:flex;align-items:center;padding:2px;">
           <div style="width:16px;height:16px;border-radius:50%;background:#fff;transform:translateX(${checked ? '16px' : '0'});transition:transform 0.15s;box-shadow:0 1px 2px rgba(0,0,0,0.2);"></div>
         </div>
       </div>
@@ -125,7 +125,7 @@ export async function showSettingsPopup() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <span style="display:flex;align-items:center;font-weight:600;font-size:13px;">${iconSlider} Settings</span>
       <div style="display:flex;align-items:center;gap:2px;">
-        <button id="ss-btn-feedback" title="Feedback" style="background:none;border:none;color:#818cf8;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;transition:color 0.15s;">${iconMail}</button>
+        <button id="ss-btn-feedback" title="Feedback" style="background:none;border:none;color:var(--ss-primary-light);cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;transition:color 0.15s;">${iconMail}</button>
         <button id="ss-settings-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
       </div>
     </div>
@@ -145,7 +145,7 @@ export async function showSettingsPopup() {
         </div>
         <button id="ss-license-buy" style="margin-top:6px;${btnStyle}width:100%;">${t.upgrade || 'Upgrade to Pro — $29'}</button>
         <div style="font-size:10px;color:#64748b;margin-top:4px;text-align:center;">
-          <a id="ss-license-recover" href="#" style="color:#818cf8;text-decoration:none;cursor:pointer;">Lost your license key? Recover</a>
+          <a id="ss-license-recover" href="#" style="color:var(--ss-primary-light);text-decoration:none;cursor:pointer;">Lost your license key? Recover</a>
         </div>
       ` : `
         <button id="ss-license-deactivate" style="margin-top:6px;${secondaryBtnStyle}width:100%;">${t.deactivate || 'Deactivate License'}</button>
@@ -336,7 +336,7 @@ export async function showSettingsPopup() {
       if (slider) slider.style.transform = `translateX(${this.checked ? '16px' : '0'})`
       // Update background
       const track = this.nextElementSibling as HTMLElement | null
-      if (track) track.style.background = this.checked ? '#6366f1' : 'rgba(255,255,255,0.12)'
+      if (track) track.style.background = this.checked ? 'var(--ss-primary)' : 'rgba(255,255,255,0.12)'
     })
   })
 

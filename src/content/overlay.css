@@ -2,16 +2,12 @@
    StyleSnap Design Tokens + Global Styles
    ═══════════════════════════════════════════════════════════ */
 
-/* Injected into :root via a <style> element — applied to all StyleSnap elements */
-#stylesnap-overlay,
-#stylesnap-preview-panel,
-#stylesnap-preview-backdrop,
-#stylesnap-settings-popup,
-#stylesnap-palette-popup,
-#stylesnap-export-menu,
-#stylesnap-floating-btn,
-#stylesnap-toast,
-#stylesnap-shortcuts-panel {
+/* Design tokens — defined on :host (the shadow root, so every element inside
+   inherits them) plus [data-stylesnap] to cover each StyleSnap element directly.
+   This replaces the old hand-maintained id list, which went stale whenever a new
+   panel was added (those panels silently got no tokens). */
+:host,
+[data-stylesnap] {
   /* ── Palette ── */
   --ss-bg-deep:        #0f172a;
   --ss-bg-panel:       rgba(15, 23, 42, 0.97);
