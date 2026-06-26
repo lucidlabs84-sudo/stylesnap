@@ -18,6 +18,7 @@ import OVERLAY_CSS from './overlay.css?inline'
 import { getLicenseStatus, activateLicenseKey, deactivateLicenseInstance, createCheckout } from '@/lib/license'
 import type { ParsedCSS, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
+import { DAILY_FREE_LIMIT } from '@/shared/constants'
 import { submitFeedback } from '@/lib/feedback'
 import { computePosition, flip, shift, offset, autoUpdate } from '@floating-ui/dom'
 
@@ -118,7 +119,7 @@ function attachOutsideClose(
 let _lastParsedCSS: ParsedCSS | null = null  // cached for compare/export
 let _overlayCleanup: (() => void) | null = null  // Floating UI autoUpdate cleanup
 let _overlayGen = 0  // generation counter to discard stale position updates
-const _history: Array<{tag: string, selector: string, snippet: string, parsedCSS: ParsedCSS | null, timestamp: number}> = []
+const _history: Array<{el: Element, tag: string, selector: string, snippet: string, parsedCSS: ParsedCSS | null, timestamp: number}> = []
 
 // Detect CSS color values
 function isColorValue(val: string): boolean {
@@ -1015,9 +1016,11 @@ function lockElement(el: Element) {
   el.classList.add(LOCKED_CLASS)
   lastHighlighted = null
   // Push to inspection history (Feature 4)
+  const _hcls = classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0, 2).join('.')
   const _hsnap = {
+    el,
     tag: el.tagName.toLowerCase(),
-    selector: (el.id ? '#'+el.id : el.tagName.toLowerCase() + ((el as HTMLElement).className ? '.'+String((el as HTMLElement).className).split(' ').filter(c=>c&&!c.startsWith('stylesnap-')).slice(0,2).join('.') : '')),
+    selector: el.id ? '#' + el.id : el.tagName.toLowerCase() + (_hcls ? '.' + _hcls : ''),
     snippet: (el as HTMLElement).outerHTML.slice(0, 80),
     parsedCSS: _lastParsedCSS,
     timestamp: Date.now(),
@@ -1071,7 +1074,7 @@ let _compareTooltip: HTMLElement | null = null
 let _lockedCSS: Record<string, string> = {}  // cached locked element styles for diffing
 
 function computeCSSDiff(hoveredEl: Element) {
-  const ov = document.getElementById(OVERLAY_ID)
+  const ov = $$(OVERLAY_ID)
   if (!ov) return
 
   const hoveredStyles = window.getComputedStyle(hoveredEl as HTMLElement)
@@ -1109,7 +1112,7 @@ function computeCSSDiff(hoveredEl: Element) {
 }
 
 function clearCompareDiff() {
-  const ov = document.getElementById(OVERLAY_ID)
+  const ov = $$(OVERLAY_ID)
   if (!ov) return
   ov.querySelectorAll('.ss-val-diff').forEach((el) => {
     el.classList.remove('ss-val-diff')
@@ -1713,7 +1716,7 @@ function showToastImpl(message: string, duration: number) {
 // ─── Keyboard Shortcuts Help ──────────────────────────────────────────
 
 function toggleShortcutsPanel() {
-  const existing = document.getElementById('stylesnap-shortcuts-panel')
+  const existing = $$('stylesnap-shortcuts-panel')
   if (existing) { existing.remove(); return }
 
   const panel = document.createElement('div')
@@ -2037,10 +2040,10 @@ function showHistoryPanel() {
   }
 
   popup.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <span style="font-weight:600;font-size:13px;">History</span>
       <span style="font-size:11px;color:#64748b;">${_history.length} items</span>
-      <button id="ss-history-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
+      <button id="ss-history-close" style="margin-left:auto;background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
     </div>
     <div id="ss-history-list">${renderItems()}</div>
   `
@@ -2054,9 +2057,10 @@ function showHistoryPanel() {
       const snap = _history[idx]
       if (!snap) return
       popup.remove()
-      // Try to find the element on the current page
-      let target: Element | null = null
-      try { target = document.querySelector(snap.selector) } catch (_) {}
+      // Prefer the exact element we locked before (stored reference); only fall
+      // back to the selector (first match) if it has been detached from the DOM.
+      let target: Element | null = snap.el && document.body.contains(snap.el) ? snap.el : null
+      if (!target) { try { target = document.querySelector(snap.selector) } catch (_) {} }
       if (target && document.body.contains(target)) {
         // Element still exists — lock and show overlay
         unlockElement()
@@ -2501,9 +2505,14 @@ function getComponentCSSForExport(el: Element): string {
   const elSelectors: string[] = []
   const otherSelectors: string[] = []
   for (const sel of sorted) {
-    // If the selector targets ONLY this element specifically (not descendants), use it for the main block
+    // If the selector targets this element (not just descendants), use it for the main block.
+    // Check membership in ALL matches — `=== querySelector(s)` only works when el is the
+    // first match, so duplicate-shaped elements (2nd, 3rd …) were misclassified. (E4)
     const isElSelector = sel.split(',').some(s => {
-      try { return el === document.querySelector(s.trim().replace(/:hover|:focus|:active/g, '')) } catch { return false }
+      try {
+        const clean = s.trim().replace(/:hover|:focus|:active/g, '')
+        return Array.from(document.querySelectorAll(clean)).includes(el)
+      } catch { return false }
     })
     if (isElSelector) elSelectors.push(sel)
     else otherSelectors.push(sel)
@@ -2842,7 +2851,7 @@ function showPreviewPanel(opts: {
   const title = opts.title || 'Preview'
 
   // Remove any existing preview panel
-  const existing = document.getElementById('stylesnap-preview-panel')
+  const existing = $$('stylesnap-preview-panel')
   if (existing) existing.remove()
 
   // Panel (position:fixed with max z-index — floats above inspector overlay)
@@ -3255,9 +3264,10 @@ async function showUpgradeModal(trigger?: string) {
     { icon: '♾️', label: t.featUpdates || 'Lifetime updates', desc: t.featUpdatesDesc || 'Pay once, own forever' },
   ]
 
+  const quotaText = ((t as Record<string, string>).quotaReached || "You've used all {limit} free extractions today. Upgrade for unlimited access.").replace('{limit}', String(DAILY_FREE_LIMIT))
   const quotaBanner = trigger === 'quota'
     ? `<div style="background:rgba(251,146,60,0.1);border:1px solid rgba(251,146,60,0.3);border-radius:6px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#fbbf24;text-align:center;">
-        ⚠️ You've used all 20 free extractions today. Upgrade for unlimited access.
+        ⚠️ ${quotaText}
       </div>`
     : ''
 
@@ -3426,7 +3436,6 @@ async function showSettingsPopup() {
   const lang = await detectLang()
   const t = translations[lang] || translations.en
 
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
   const inputStyle = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:5px 8px;color:#e2e8f0;font-size:11px;width:100%;box-sizing:border-box;'
   const btnStyle = 'background:#6366f1;border:none;border-radius:4px;padding:5px 10px;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;'
@@ -3461,11 +3470,11 @@ async function showSettingsPopup() {
       }).join('')
     }</div>`
   }
-  const toggleHtml = (id: string, checked: boolean, onChange: string) =>
+  const toggleHtml = (id: string, checked: boolean) =>
     `<label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:3px 0;">
       <span style="font-size:11px;color:#cbd5e1;flex:1;margin-right:8px;"><span id="ss-label-${id}"></span></span>
       <div style="position:relative;width:36px;height:20px;flex:none;">
-        <input id="${id}" type="checkbox" ${checked ? 'checked' : ''} onchange="${esc(onChange)}"
+        <input id="${id}" type="checkbox" ${checked ? 'checked' : ''}
           style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;z-index:1;margin:0;">
         <div style="width:36px;height:20px;border-radius:10px;background:${checked ? '#6366f1' : 'rgba(255,255,255,0.12)'};transition:background 0.15s;display:flex;align-items:center;padding:2px;">
           <div style="width:16px;height:16px;border-radius:50%;background:#fff;transform:translateX(${checked ? '16px' : '0'});transition:transform 0.15s;box-shadow:0 1px 2px rgba(0,0,0,0.2);"></div>
@@ -3510,12 +3519,12 @@ async function showSettingsPopup() {
     <!-- Preferences -->
     <div style="${sectionStyle}">
       <span style="font-weight:600;font-size:11px;color:#e2e8f0;margin-bottom:4px;">${iconSlider} ${t.preferences || 'Preferences'}</span>
-      ${toggleHtml('ss-pref-floating-btn', settings.showFloatingBtn !== false, 'void(0)')}
+      ${toggleHtml('ss-pref-floating-btn', settings.showFloatingBtn !== false)}
       <div id="ss-floating-btn-hint" style="font-size:9px;color:#64748b;margin-top:-2px;margin-bottom:4px;margin-left:2px;${settings.showFloatingBtn !== false ? 'display:none;' : ''}">
         💡 Click the StyleSnap toolbar icon to reopen settings
       </div>
-      ${toggleHtml('ss-pref-show-tw', settings.showTailwindOverlay !== false, 'void(0)')}
-      ${toggleHtml('ss-pref-side-panel', settings.showSidePanel !== false, 'void(0)')}
+      ${toggleHtml('ss-pref-show-tw', settings.showTailwindOverlay !== false)}
+      ${toggleHtml('ss-pref-side-panel', settings.showSidePanel !== false)}
       <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
         <span style="font-size:11px;color:#cbd5e1;white-space:nowrap;">Overlay:</span>
         ${chipGroup('ss-pref-overlay-side', [
@@ -4103,7 +4112,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
     if (changes.language) {
       const lang = changes.language.newValue
-      const overlay = document.getElementById(OVERLAY_ID)
+      const overlay = $$(OVERLAY_ID)
       if (overlay) overlay.setAttribute('data-lang', lang || 'en')
     }
 
@@ -4199,9 +4208,9 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
 // ─── Cleanup on page unload ───────────────────────────────────────────
 window.addEventListener('pagehide', () => {
   hideOverlay()
-  document.getElementById('stylesnap-floating-btn')?.remove()
-  document.getElementById('stylesnap-overlay')?.remove()
-  document.getElementById('stylesnap-preview-panel')?.remove()
+  $$('stylesnap-floating-btn')?.remove()
+  $$('stylesnap-overlay')?.remove()
+  $$('stylesnap-preview-panel')?.remove()
 })
 
 // ─── Debug helpers (dev build only) ─────────────────────────────────
