@@ -9,161 +9,42 @@ import './overlay.css'
 import { parseElement, extractComponentHTML, extractComponentCSS, formatCSS } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { detectLang, translations, TranslationKey } from '@/lib/i18n-core'
-import { SHADOW_FLOATING_BTN_CSS, SHADOW_HINT_BAR_CSS } from './shadow-styles'
-// Instead of injecting into the global page context via vite/rollup, we inject overlay.css directly into Shadow DOM.
-// We can use a raw import for Vite if we want the raw string, or simply append a link tag.
-// For now, we will import it as raw string using vite's ?raw feature
-import OVERLAY_CSS from './overlay.css?inline'
+import {
+  stAppend, $$, attachOutsideClose,
+  isColorValue, escapeHtml, classNameOf, colorBlock,
+  SVG, CLOSE_X, showToast, closeHintPopups,
+} from './ui'
+import { mapCSSToTailwind, getTailwindClasses } from './tailwind'
+import { S, isActive, assistMode, OVERLAY_ID, HIGHLIGHT_CLASS, LOCKED_CLASS, PREVIEW_CLASS, FLOATING_BTN_ID } from './state'
+import { showUpgradeModal } from './panels/modals'
+import { showAIPrompt } from './panels/ai-prompt'
+import { showDesignPopup } from './panels/design'
+import { toggleShortcutsPanel } from './panels/shortcuts'
+import { showPreviewPanel, extractPreviewHTML } from './panels/preview-dev'
+import { updateSidePanel, hideSidePanel } from './side-panel'
+import { showSettingsPopup } from './panels/settings'
 
-import { getLicenseStatus, activateLicenseKey, deactivateLicenseInstance, createCheckout } from '@/lib/license'
-import type { ParsedCSS, UserSettings } from '@/shared/types'
-import { DEFAULT_SETTINGS } from '@/shared/types'
-import { DAILY_FREE_LIMIT } from '@/shared/constants'
-import { submitFeedback } from '@/lib/feedback'
+import { getLicenseStatus } from '@/lib/license'
+import type { ParsedCSS } from '@/shared/types'
 import { computePosition, flip, shift, offset, autoUpdate } from '@floating-ui/dom'
 
 // ─── State ────────────────────────────────────────────────────────────
-
-/**
- * inspectMode:
- *   0 = Off
- *   1 = Inspect (hover highlight + CSS overlay)
- *   2 = Guidelines (crosshairs)
- *   3 = Grid (all-element outlines)
- */
-let inspectMode = 0
-let lastMode = 0           // 上次使用的模式，仅用于 UI 提示，不自动激活
-let lastHighlighted: Element | null = null
-let lockedElement: Element | null = null
-let compareMode = false    // Compare toggle — user must enable from panel
-let _licenseIsPro = false   // cached license status
+// Mutable state + shared constants live in ./state (the `S` object).
 
 // Init: load cached license
-getLicenseStatus().then(s => { _licenseIsPro = s.isPro })
+getLicenseStatus().then(s => { S.licenseIsPro = s.isPro })
 
-// derived helpers
-const isActive = () => inspectMode > 0 && !$$('stylesnap-settings-popup') && !$$('stylesnap-design-popup')
-const assistMode = () => (inspectMode >= 2 ? inspectMode - 1 : 0) // 0=off, 1=lines, 2=grid
-
-const OVERLAY_ID = 'stylesnap-overlay'
-const HIGHLIGHT_CLASS = 'stylesnap-highlight'
-const LOCKED_CLASS = 'stylesnap-locked'
-const PREVIEW_CLASS = 'stylesnap-preview'
-const FLOATING_BTN_ID = 'stylesnap-floating-btn'
-const SHADOW_HOST_ID = 'stylesnap-root'
-
-// ─── Shadow DOM isolation (prevents page CSS from polluting extension UI) ───
-let _stShadow: ShadowRoot | null = null
-function getStShadow(): ShadowRoot {
-  if (_stShadow) return _stShadow
-  const host = document.createElement('div')
-  host.id = SHADOW_HOST_ID
-  host.setAttribute('data-stylesnap', 'true')
-  Object.assign(host.style, {
-    position: 'fixed', top: '0', left: '0', width: '0', height: '0', zIndex: '9999990',
-    overflow: 'visible',
-  })
-  document.body.appendChild(host)
-  _stShadow = host.attachShadow({ mode: 'open' })
-  const fbStyle = document.createElement('style')
-  fbStyle.textContent = SHADOW_FLOATING_BTN_CSS + '\n' + SHADOW_HINT_BAR_CSS + '\n' + OVERLAY_CSS + '\n' +
-    '@keyframes ss-bubble-pulse { 0%, 100% { transform: translateY(0); box-shadow: 0 4px 16px rgba(99,102,241,0.5); } 50% { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(99,102,241,0.7); } }'
-  _stShadow.appendChild(fbStyle)
-  return _stShadow
-}
-function stAppend(el: HTMLElement) { getStShadow().appendChild(el) }
-function $$(id: string): HTMLElement | null {
-  return (_stShadow ? _stShadow.getElementById(id) : null) || document.getElementById(id)
-}
-
-/**
- * Attach "click-outside (and optional Esc) to close" to a shadow-DOM panel,
- * with leak-proof cleanup: a MutationObserver tears down the document-level
- * listeners whenever the panel leaves the DOM — regardless of which path
- * removed it (close button, item click, mutual-exclusion, programmatic remove).
- * Uses composedPath() so clicks inside the shadow tree are correctly detected.
- * Returns a close() that removes the panel and runs onClose.
- */
-function attachOutsideClose(
-  panel: HTMLElement,
-  opts: { onClose?: () => void; esc?: boolean; delay?: number } = {},
-): () => void {
-  let done = false
-  const cleanup = () => {
-    if (done) return
-    done = true
-    document.removeEventListener('click', onClick)
-    if (opts.esc) document.removeEventListener('keydown', onKey)
-    obs.disconnect()
-  }
-  const close = () => {
-    cleanup()
-    if (panel.isConnected) panel.remove()
-    opts.onClose?.()
-  }
-  const onClick = (ev: MouseEvent) => { if (!ev.composedPath().includes(panel)) close() }
-  const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.stopPropagation(); close() } }
-  // Auto-cleanup the moment the panel is detached, by any code path.
-  const root = panel.getRootNode() as ShadowRoot | Document
-  const obs = new MutationObserver(() => { if (!panel.isConnected) cleanup() })
-  obs.observe(root, { childList: true, subtree: true })
-  // Defer so the click that opened the panel doesn't immediately close it.
-  setTimeout(() => {
-    if (done) return
-    document.addEventListener('click', onClick)
-    if (opts.esc) document.addEventListener('keydown', onKey)
-  }, opts.delay ?? 100)
-  return close
-}
-// editMode removed — always per-line view with grouped categories
-let _lastParsedCSS: ParsedCSS | null = null  // cached for compare/export
-let _overlayCleanup: (() => void) | null = null  // Floating UI autoUpdate cleanup
-let _overlayGen = 0  // generation counter to discard stale position updates
-const _history: Array<{el: Element, tag: string, selector: string, snippet: string, parsedCSS: ParsedCSS | null, timestamp: number}> = []
-
-// Detect CSS color values
-function isColorValue(val: string): boolean {
-  if (!val) return false
-  const v = val.trim().toLowerCase()
-  if (/^#[0-9a-f]{3,8}$/i.test(v)) return true
-  if (/^rgb\(/.test(v) || /^rgba\(/.test(v)) return true
-  if (/^hsl\(/.test(v) || /^hsla\(/.test(v)) return true
-  const namedColors = ['transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'revert']
-  if (namedColors.includes(v)) return false
-  // Use a dummy element to check if it's a valid CSS color
-  if (CSS.supports('color', v)) return true
-  return false
-}
-
-// HTML-escape user-supplied CSS values to prevent XSS when injecting into innerHTML
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-/** Safe className accessor — SVG elements expose SVGAnimatedString (no .split/.replace) */
-function classNameOf(el: Element): string {
-  const cn = (el as HTMLElement).className
-  return typeof cn === 'string' ? cn : (el.getAttribute('class') || '')
-}
-
-// Get color preview block HTML
-function colorBlock(val: string): string {
-  // Only pass through if it's a safe CSS color value; strip quotes and escape for style attr
-  const safe = val.replace(/"/g, '').replace(/[<>]/g, '')
-  return `<span class="ss-color-block" style="background:${safe}"></span> `
-}
 
 // ─── Display format preferences ────────────────────────────────────────
 let _colorFormat: 'rgb' | 'hex' | 'hsl' = 'rgb'
 let _shortenCSS = true
-let _showSidePanel = true
 
 function reloadFormatSettings() {
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
     const s = res.stylesnap_settings || {}
     _colorFormat = s.colorFormat || 'rgb'
     _shortenCSS = s.shortenCSS !== false
-    _showSidePanel = s.showSidePanel !== false
+    S.showSidePanel = s.showSidePanel !== false
   })
 }
 
@@ -244,10 +125,7 @@ function formatDisplayValue(prop: string, value: string): string {
 }
 
 // ─── Mode icon mapping ────────────────────────────────────────────────
-/** Shared SVG attribute string — all Lucide-line icons use this */
-const SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"'
-/** Shared close (X) icon, 14×14 */
-const CLOSE_X = `<svg ${SVG} width="14" height="14"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
+// SVG / CLOSE_X now imported from ./ui
 
 const MODE_ICON_SVG = [
   // 0: Off
@@ -264,22 +142,22 @@ const MODE_BADGE_COLOR = ['#5F5E5A', '#534AB7', '#0F6E56', '#185FA5'] as const
 
 function updateModeUI() {
   document.body.classList.remove('stylesnap-mode-guidelines', 'stylesnap-mode-grid')
-  if (inspectMode === 2) document.body.classList.add('stylesnap-mode-guidelines')
-  else if (inspectMode === 3) document.body.classList.add('stylesnap-mode-grid')
+  if (S.inspectMode === 2) document.body.classList.add('stylesnap-mode-guidelines')
+  else if (S.inspectMode === 3) document.body.classList.add('stylesnap-mode-grid')
 
   // floating button state
   const btn = $$(FLOATING_BTN_ID)
   if (!btn) return
 
   // active ring animation
-  if (inspectMode > 0) btn.classList.add('is-active')
+  if (S.inspectMode > 0) btn.classList.add('is-active')
   else btn.classList.remove('is-active')
 
   const badge = btn.querySelector('.stylesnap-mode-badge') as HTMLElement | null
   if (badge) {
-    if (inspectMode > 0) {
-      badge.innerHTML = MODE_ICON_SVG[inspectMode]
-      badge.style.background = MODE_BADGE_COLOR[inspectMode]
+    if (S.inspectMode > 0) {
+      badge.innerHTML = MODE_ICON_SVG[S.inspectMode]
+      badge.style.background = MODE_BADGE_COLOR[S.inspectMode]
       badge.style.setProperty('border', 'none', 'important')
       badge.style.setProperty('display', 'flex', 'important')
     } else {
@@ -288,7 +166,7 @@ function updateModeUI() {
     }
   }
 
-  const target = lockedElement || lastHighlighted
+  const target = S.lockedElement || S.lastHighlighted
   if (target) updateGuides(target.getBoundingClientRect())
 }
 
@@ -305,11 +183,11 @@ function applyInspectorListeners(add: boolean) {
 
 function setInspectMode(newMode: number) {
   const wasActive = isActive()
-  inspectMode = newMode
+  S.inspectMode = newMode
   const nowActive = isActive()
 
   // remember last used mode (for UI hint on next page load)
-  if (newMode > 0) lastMode = newMode
+  if (newMode > 0) S.lastMode = newMode
 
   if (!wasActive && nowActive) {
     initGuides()
@@ -328,7 +206,7 @@ function setInspectMode(newMode: number) {
   // persist
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
     const s = res.stylesnap_settings || {}
-    s.inspectMode = inspectMode
+    s.S.inspectMode = S.inspectMode
     if (newMode > 0) s.lastUsedMode = newMode
     chrome.storage.local.set({ stylesnap_settings: s })
   })
@@ -483,7 +361,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const allProps = Object.entries(filteredStyles)
 
   // ─── Tailwind: Free limited display ───────────────────
-  const isPro = _licenseIsPro
+  const isPro = S.licenseIsPro
   const MAX_FREE_TW = 4
   const twSlice = isPro ? tailwindClasses.length : Math.min(tailwindClasses.length, MAX_FREE_TW)
   const twHidden = tailwindClasses.length - twSlice
@@ -572,7 +450,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     ? `<div class="ss-expand"><button class="ss-expand-btn" data-expanded="0">Show all ${allProps.length} properties</button></div>`
     : ''
 
-  const isCurrentlyLocked = !!lockedElement
+  const isCurrentlyLocked = !!S.lockedElement
 
   // ─── Build overlay ───
   let contentHtml = `
@@ -623,11 +501,11 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   overlay.dataset.locked = isCurrentlyLocked ? '1' : '0'
 
   // Clean up previous autoUpdate listener
-  if (_overlayCleanup) { _overlayCleanup(); _overlayCleanup = null }
+  if (S.overlayCleanup) { S.overlayCleanup(); S.overlayCleanup = null }
 
   // Floating UI: smart placement with flip + shift
   // Use generation counter to discard stale async position updates
-  const gen = ++_overlayGen
+  const gen = ++S.overlayGen
   const updatePosition = () => {
     computePosition(el, overlay, {
       strategy: 'fixed',
@@ -639,12 +517,12 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       ],
     }).then(({ x, y }) => {
       // Discard if a newer showOverlay call has happened
-      if (gen !== _overlayGen) return
+      if (gen !== S.overlayGen) return
       overlay.style.setProperty('left', `${Math.round(x)}px`, 'important')
       overlay.style.setProperty('top', `${Math.round(y)}px`, 'important')
     }).catch(() => {
       // Fallback: position below element with naive calc
-      if (gen !== _overlayGen) return
+      if (gen !== S.overlayGen) return
       const elRect = el.getBoundingClientRect()
       const ovRect = overlay.getBoundingClientRect()
       let fallbackTop = elRect.bottom + 4
@@ -666,7 +544,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   updatePosition()
   // Only auto-track when hovering (not locked) — locked overlay stays put
   if (!isCurrentlyLocked) {
-    _overlayCleanup = autoUpdate(el, overlay, updatePosition)
+    S.overlayCleanup = autoUpdate(el, overlay, updatePosition)
   }
 
   // ─── Inline edit + per-value copy handlers (reusable for expand) ───
@@ -677,8 +555,8 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
         const prop = span.dataset.prop
         const newVal = span.textContent?.trim() || ''
         span.dataset.original = newVal
-        if (prop && lockedElement) {
-          ;(lockedElement as HTMLElement).style.setProperty(prop, newVal)
+        if (prop && S.lockedElement) {
+          ;(S.lockedElement as HTMLElement).style.setProperty(prop, newVal)
           showToast(`${prop}: ${newVal} ✓`)
         }
       }
@@ -768,7 +646,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     copyBtn.dataset.bound = 'true'
     copyBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
-      const target = lockedElement || lastHighlighted
+      const target = S.lockedElement || S.lastHighlighted
       if (!target) { showToast('Hover an element first'); return }
       copyCurrentCSS(target)
       // Visual feedback: green flash + checkmark
@@ -795,7 +673,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     twCopyBtn.dataset.bound = 'true'
     twCopyBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
-      const target = lockedElement || lastHighlighted
+      const target = S.lockedElement || S.lastHighlighted
       if (!target) { showToast('Hover an element first'); return }
       const twClasses = getTailwindClasses(target)
       if (!twClasses) { showToast('No Tailwind classes found'); return }
@@ -821,7 +699,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     exportBtn.dataset.bound = 'true'
     exportBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
-      if (!lockedElement) { showToast('Lock an element first'); return }
+      if (!S.lockedElement) { showToast('Lock an element first'); return }
       exportCSSToCodePen()
     })
   }
@@ -832,13 +710,13 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     aiBtn.dataset.bound = 'true'
     aiBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
-      if (!lockedElement) { showToast('Lock an element first'); return }
+      if (!S.lockedElement) { showToast('Lock an element first'); return }
       showAIPrompt()
     })
   }
 
   // ─── Side panel (Box Model + Preview) — only when locked ───────────
-  if (_showSidePanel && isCurrentlyLocked) {
+  if (S.showSidePanel && isCurrentlyLocked) {
     updateSidePanel(el as HTMLElement, parsedCSS, overlay)
   } else {
     hideSidePanel()
@@ -854,7 +732,7 @@ function hideOverlay() {
     delete overlay.dataset.lastHtml
   }
   // Clean up Floating UI autoUpdate listener
-  if (_overlayCleanup) { _overlayCleanup(); _overlayCleanup = null }
+  if (S.overlayCleanup) { S.overlayCleanup(); S.overlayCleanup = null }
   // Clean up any open export menu
   const menu = $$('stylesnap-export-menu')
   if (menu) menu.remove()
@@ -862,159 +740,30 @@ function hideOverlay() {
 }
 
 // ─── Side Panel (Box Model + Preview) ────────────────────────────────
-const SIDE_PANEL_ID = 'stylesnap-side-panel'
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-}
-
-/** Box model content HTML (no wrapper) */
-function buildBoxModel(el: HTMLElement, rect: DOMRect): string {
-  const cs = window.getComputedStyle(el)
-  const get = (p: string) => {
-    const n = parseFloat(cs.getPropertyValue(p))
-    return isNaN(n) ? '0' : (n === Math.round(n) ? String(Math.round(n)) : n.toFixed(1))
-  }
-  const mt = get('margin-top'), mr = get('margin-right'), mb = get('margin-bottom'), ml = get('margin-left')
-  const bt = get('border-top-width'), br = get('border-right-width'), bb = get('border-bottom-width'), bl = get('border-left-width')
-  const pt = get('padding-top'), pr = get('padding-right'), pb = get('padding-bottom'), pl = get('padding-left')
-  const w = Math.round(rect.width), h = Math.round(rect.height)
-  return `<div class="ss-boxmodel">
-    <div class="ss-bm-margin">
-      <span class="ss-bm-val ss-bm-top">${mt}</span>
-      <div class="ss-bm-border">
-        <span class="ss-bm-val ss-bm-left">${ml}</span>
-        <div class="ss-bm-padding">
-          <span class="ss-bm-val ss-bm-top">${pt}</span>
-          <div class="ss-bm-content">${w}×${h}</div>
-          <span class="ss-bm-val ss-bm-bot">${pb}</span>
-        </div>
-        <span class="ss-bm-val ss-bm-right">${mr}</span>
-      </div>
-      <span class="ss-bm-val ss-bm-bot">${mb}</span>
-    </div>
-    <div class="ss-bm-edge-labels">
-      <span style="color:#60a5fa">B:${bt} ${br} ${bb} ${bl}</span>
-      <span style="color:#34d399">P:${pt} ${pr} ${pb} ${pl}</span>
-    </div>
-  </div>`
-}
-
-/** Preview iframe content (sandboxed, renders element HTML + extracted CSS) */
-function buildPreviewHTML(el: HTMLElement, parsedCSS: ParsedCSS | null): string {
-  const elHTML = el.outerHTML.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-  const cssStr = parsedCSS?.styles
-    ? Object.entries(parsedCSS.styles).map(([k, v]) => `${k}:${v}`).join(';')
-    : ''
-  const selector = parsedCSS?.selector || el.tagName.toLowerCase()
-  const srcDoc = `<!DOCTYPE html><html><head><style>
-    body{margin:8px;background:#1e293b;display:flex;align-items:flex-start;justify-content:center;padding:8px;}
-    ${selector}{${cssStr}}
-  </style></head><body>${elHTML}</body></html>`
-  return `<iframe sandbox="allow-same-origin" srcdoc="${escapeAttr(srcDoc)}" style="width:100%;height:130px;border:none;border-radius:4px;background:#1e293b;display:block;"></iframe>`
-}
-
-function updateSidePanel(el: HTMLElement, parsedCSS: ParsedCSS | null, overlay: HTMLElement) {
-  let panel = $$(SIDE_PANEL_ID)
-  if (!panel) {
-    panel = document.createElement('div')
-    panel.id = SIDE_PANEL_ID
-    panel.setAttribute('data-stylesnap', 'true')
-    Object.assign(panel.style, {
-      position: 'fixed', zIndex: '9999990',
-      background: 'rgba(15,23,42,0.97)',
-      border: '1px solid rgba(99,102,241,0.2)',
-      borderRadius: '10px', width: '220px',
-      boxShadow: '0 4px 24px rgba(0,0,0,0.45)',
-      fontFamily: 'system-ui,sans-serif', fontSize: '11px',
-      color: '#e2e8f0', overflow: 'hidden',
-    })
-    stAppend(panel)
-  }
-
-  const rect = el.getBoundingClientRect()
-  const bm = buildBoxModel(el, rect)
-  const pv = buildPreviewHTML(el, parsedCSS)
-  const chevron = (open: boolean) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><polyline points="${open ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}"/></svg>`
-  const bmOpen = localStorage.getItem('ss-sp-boxmodel') !== '0'
-  const pvOpen = localStorage.getItem('ss-sp-preview') === '1'
-
-  panel.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.06);">
-      <span style="font-size:10px;font-weight:600;color:#64748b;letter-spacing:0.05em;text-transform:uppercase;">Inspector</span>
-      <button id="ss-sp-close" title="Close" style="background:none;border:none;color:#475569;cursor:pointer;padding:2px;display:flex;border-radius:3px;">${CLOSE_X}</button>
-    </div>
-    <div class="ss-sp-section">
-      <div class="ss-sp-header" data-key="ss-sp-boxmodel" data-open="${bmOpen ? '1' : '0'}" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;color:#64748b;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;user-select:none;">
-        <span>Box Model</span>${chevron(bmOpen)}
-      </div>
-      <div class="ss-sp-body" style="display:${bmOpen ? 'block' : 'none'};padding:4px 10px 10px;">${bm}</div>
-    </div>
-    <div class="ss-sp-section" style="border-top:1px solid rgba(255,255,255,0.05);">
-      <div class="ss-sp-header" data-key="ss-sp-preview" data-open="${pvOpen ? '1' : '0'}" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;color:#64748b;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;user-select:none;">
-        <span>Preview</span>${chevron(pvOpen)}
-      </div>
-      <div class="ss-sp-body" style="display:${pvOpen ? 'block' : 'none'};padding:0 8px 8px;">${pv}</div>
-    </div>
-  `
-
-  panel.querySelector('#ss-sp-close')?.addEventListener('click', () => panel!.remove())
-
-  panel.querySelectorAll('.ss-sp-header').forEach(h => {
-    h.addEventListener('click', () => {
-      const header = h as HTMLElement
-      const key = header.dataset.key || ''
-      const body = header.nextElementSibling as HTMLElement | null
-      const nowOpen = header.dataset.open !== '1'
-      header.dataset.open = nowOpen ? '1' : '0'
-      const poly = header.querySelector('polyline')
-      if (poly) poly.setAttribute('points', nowOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9')
-      if (body) body.style.display = nowOpen ? 'block' : 'none'
-      if (key) localStorage.setItem(key, nowOpen ? '1' : '0')
-    })
-  })
-
-  positionSidePanel(panel, overlay)
-}
-
-function positionSidePanel(panel: HTMLElement, overlay: HTMLElement) {
-  const ovRect = overlay.getBoundingClientRect()
-  const panelWidth = 220, gap = 8
-  let left = ovRect.right + gap
-  if (left + panelWidth > window.innerWidth - 8) left = ovRect.left - panelWidth - gap
-  left = Math.max(8, left)
-  const top = Math.max(8, Math.min(ovRect.top, window.innerHeight - 360))
-  panel.style.left = `${Math.round(left)}px`
-  panel.style.top = `${Math.round(top)}px`
-}
-
-function hideSidePanel() {
-  $$(SIDE_PANEL_ID)?.remove()
-}
 
 // ─── Inline edit ────────────────────────────────────────────────────
 
 function highlightElement(el: Element) {
-  if (lockedElement && el !== lockedElement) return
+  if (S.lockedElement && el !== S.lockedElement) return
   removeHighlight()
   el.classList.add(HIGHLIGHT_CLASS)
-  lastHighlighted = el
+  S.lastHighlighted = el
 }
 
 function removeHighlight() {
-  if (lastHighlighted && lastHighlighted !== lockedElement) {
-    lastHighlighted.classList.remove(HIGHLIGHT_CLASS, PREVIEW_CLASS)
-    lastHighlighted = null
+  if (S.lastHighlighted && S.lastHighlighted !== S.lockedElement) {
+    S.lastHighlighted.classList.remove(HIGHLIGHT_CLASS, PREVIEW_CLASS)
+    S.lastHighlighted = null
   }
 }
 
 function lockElement(el: Element) {
-  if (lockedElement) lockedElement.classList.remove(LOCKED_CLASS)
+  if (S.lockedElement) S.lockedElement.classList.remove(LOCKED_CLASS)
   // Clean up highlight/preview classes before adding lock
   el.classList.remove(HIGHLIGHT_CLASS, PREVIEW_CLASS)
-  lockedElement = el
+  S.lockedElement = el
   el.classList.add(LOCKED_CLASS)
-  lastHighlighted = null
+  S.lastHighlighted = null
   // Push to inspection history (Feature 4)
   const _hcls = classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0, 2).join('.')
   const _hsnap = {
@@ -1022,13 +771,13 @@ function lockElement(el: Element) {
     tag: el.tagName.toLowerCase(),
     selector: el.id ? '#' + el.id : el.tagName.toLowerCase() + (_hcls ? '.' + _hcls : ''),
     snippet: (el as HTMLElement).outerHTML.slice(0, 80),
-    parsedCSS: _lastParsedCSS,
+    parsedCSS: S.lastParsedCSS,
     timestamp: Date.now(),
   }
-  _history.unshift(_hsnap)
-  if (_history.length > 10) _history.pop()
+  S.history.unshift(_hsnap)
+  if (S.history.length > 10) S.history.pop()
   // Stop auto-tracking — locked overlay stays fixed
-  if (_overlayCleanup) { _overlayCleanup(); _overlayCleanup = null }
+  if (S.overlayCleanup) { S.overlayCleanup(); S.overlayCleanup = null }
   const overlay = $$(OVERLAY_ID)
   if (overlay) {
     overlay.classList.remove('ss-interactive')
@@ -1038,9 +787,9 @@ function lockElement(el: Element) {
 }
 
 function unlockElement() {
-  if (lockedElement) {
-    lockedElement.classList.remove(LOCKED_CLASS)
-    lockedElement = null
+  if (S.lockedElement) {
+    S.lockedElement.classList.remove(LOCKED_CLASS)
+    S.lockedElement = null
   }
   removeCompareHighlight()
   hideCompareTooltip()
@@ -1121,7 +870,7 @@ function clearCompareDiff() {
 }
 
 function highlightCompareElement(el: Element | null) {
-  if (!el || el === lockedElement) return
+  if (!el || el === S.lockedElement) return
   const elh = el as HTMLElement
   if (_compareTarget && _compareTarget !== elh) {
     _compareTarget.classList.remove('stylesnap-compare-highlight')
@@ -1305,8 +1054,8 @@ function getComponentCSS(el: Element): ComponentCSS {
 // ─── Copy CSS ─────────────────────────────────────────────────────────
 
 function copyCurrentCSS(_el: Element) {
-  if (_lastParsedCSS && _lastParsedCSS.styles && Object.keys(_lastParsedCSS.styles).length > 0) {
-    const output = formatCSS(_lastParsedCSS.styles, _lastParsedCSS.selector)
+  if (S.lastParsedCSS && S.lastParsedCSS.styles && Object.keys(S.lastParsedCSS.styles).length > 0) {
+    const output = formatCSS(S.lastParsedCSS.styles, S.lastParsedCSS.selector)
     navigator.clipboard.writeText(output).then(() => showToast('CSS copied!'))
       .catch(() => showToast('Copy failed'))
   } else {
@@ -1342,16 +1091,16 @@ function handleMouseMove(e: MouseEvent) {
 
   // If an element is locked, show preview dashed outline on other elements
   // (but keep overlay frozen on the locked element)
-  if (lockedElement) {
-    if (!compareMode) {
-      if (el === lockedElement || el === lastHighlighted) return
+  if (S.lockedElement) {
+    if (!S.compareMode) {
+      if (el === S.lockedElement || el === S.lastHighlighted) return
       removeHighlight()
       el.classList.add(PREVIEW_CLASS)
-      lastHighlighted = el
+      S.lastHighlighted = el
       return
     }
     // Compare mode: keep existing logic
-    if (el === lockedElement) {
+    if (el === S.lockedElement) {
       removeCompareHighlight()
       hideCompareTooltip()
       return
@@ -1361,7 +1110,7 @@ function handleMouseMove(e: MouseEvent) {
     return
   }
 
-  if (el === lastHighlighted) return
+  if (el === S.lastHighlighted) return
 
   removeCompareHighlight()
   hideCompareTooltip()
@@ -1403,7 +1152,7 @@ function onClick(e: MouseEvent) {
   e.stopPropagation()
 
   if (!el || el === document.documentElement || el === document.body) {
-    if (lockedElement) {
+    if (S.lockedElement) {
       unlockElement()
       chrome.runtime.sendMessage({ type: 'ELEMENT_UNLOCKED' }).catch(() => {})
       hideOverlay()
@@ -1411,9 +1160,9 @@ function onClick(e: MouseEvent) {
     return
   }
 
-  if (lockedElement) {
+  if (S.lockedElement) {
     // Click on a different element → swap lock
-    if (el !== lockedElement) {
+    if (el !== S.lockedElement) {
       lockElement(el)
       const parsedCSS = parseElement(el)
       showOverlay(el, parsedCSS)
@@ -1463,12 +1212,12 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     e.stopPropagation()
     // cycle only the visual assist layer (2/3), keep inspect on
-    if (inspectMode === 1) setInspectMode(2)
-    else if (inspectMode === 2) setInspectMode(3)
-    else if (inspectMode === 3) setInspectMode(1)
+    if (S.inspectMode === 1) setInspectMode(2)
+    else if (S.inspectMode === 2) setInspectMode(3)
+    else if (S.inspectMode === 3) setInspectMode(1)
     const labels = ['Off', 'Inspect', 'Guidelines', 'Grid']
-    showToast(`Mode: ${labels[inspectMode]}`)
-    const target = lockedElement || lastHighlighted
+    showToast(`Mode: ${labels[S.inspectMode]}`)
+    const target = S.lockedElement || S.lastHighlighted
     if (target) updateGuides(target.getBoundingClientRect())
     return
   }
@@ -1485,7 +1234,7 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     e.stopPropagation()
     // Priority: unlock, then exit inspect mode
-    if (lockedElement) {
+    if (S.lockedElement) {
       unlockElement()
       removeCompareHighlight()
       hideCompareTooltip()
@@ -1498,7 +1247,7 @@ function onKeyDown(e: KeyboardEvent) {
   }
 
   // ─── DOM tree navigation (Arrow keys) ───
-  const navEl = lockedElement || lastHighlighted
+  const navEl = S.lockedElement || S.lastHighlighted
   if (navEl && isActive() && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault()
     e.stopPropagation()
@@ -1528,19 +1277,19 @@ function onKeyDown(e: KeyboardEvent) {
 
     if (target && target !== document.body && target !== document.documentElement) {
       const parsedCSS = parseElement(target)
-      _lastParsedCSS = parsedCSS
+      S.lastParsedCSS = parsedCSS
 
-      if (lockedElement) {
+      if (S.lockedElement) {
         // Navigate from locked element → lock on new element
         unlockElement()
         lockElement(target)
         // Don't call highlightElement — locked visual is sufficient,
         // and adding HIGHLIGHT_CLASS on top of LOCKED_CLASS causes it to
-        // never be cleaned up (removeHighlight skips when lastHighlighted===lockedElement)
+        // never be cleaned up (removeHighlight skips when S.lastHighlighted===S.lockedElement)
       } else {
         // Navigate from hovered element → hover new element
         removeHighlight()
-        lastHighlighted = target
+        S.lastHighlighted = target
         highlightElement(target)
       }
 
@@ -1671,319 +1420,9 @@ function hideHintBar() {
 }
 
 // ─── Toast Notification ────────────────────────────────────────────────
+// showToast / showToastImpl now imported from ./ui
 
-let toastTimeout: number | null = null
-function showToast(message: string) {
-  showToastImpl(message, 2000)
-}
-
-function showToastImpl(message: string, duration: number) {
-  let toast = $$('stylesnap-toast')
-  if (!toast) {
-    toast = document.createElement('div')
-    toast.id = 'stylesnap-toast'
-    toast.setAttribute('data-stylesnap', 'true')
-    Object.assign(toast.style, {
-      position: 'fixed',
-      bottom: '80px',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      background: 'rgba(15, 23, 42, 0.9)',
-      color: '#fff',
-      padding: '8px 16px',
-      borderRadius: '8px',
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: '13px',
-      fontWeight: '500',
-      zIndex: '999993',
-      pointerEvents: 'none',
-      transition: 'opacity 0.2s ease',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-      border: '1px solid rgba(255,255,255,0.1)'
-    })
-    stAppend(toast)
-  }
-  toast.textContent = message
-  toast.style.opacity = '1'
-  if (toastTimeout) window.clearTimeout(toastTimeout)
-  if (duration > 0) {
-    toastTimeout = window.setTimeout(() => {
-      if (toast) toast.style.opacity = '0'
-    }, duration)
-  }
-}
-
-// ─── Keyboard Shortcuts Help ──────────────────────────────────────────
-
-function toggleShortcutsPanel() {
-  const existing = $$('stylesnap-shortcuts-panel')
-  if (existing) { existing.remove(); return }
-
-  const panel = document.createElement('div')
-  panel.id = 'stylesnap-shortcuts-panel'
-  panel.setAttribute('data-stylesnap', 'true')
-
-  const shortcuts = [
-    ['Hover + Click', 'Lock / unlock element'],
-    ['Escape', 'Unlock or exit inspect mode'],
-    ['↑ ↓ ← →', 'Navigate parent / child / siblings'],
-    ['Space (locked)', 'Toggle compare mode'],
-    ['?', 'Show / hide this help'],
-  ]
-
-  panel.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-      <h3 style="margin:0;font-size:14px;font-weight:600;color:var(--ss-text, #e2e8f0);">⌨️ Keyboard Shortcuts</h3>
-      <button id="ss-shortcuts-close" style="background:none;border:none;color:var(--ss-text-muted, #94a3b8);cursor:pointer;font-size:18px;padding:0 4px;line-height:1;">&times;</button>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      ${shortcuts.map(([key, desc]) => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-          <span style="color:var(--ss-text-muted, #94a3b8);font-size:11px;">${desc}</span>
-          <kbd>${key}</kbd>
-        </div>
-      `).join('')}
-    </div>
-    <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);font-size:10px;color:var(--ss-text-dim, #64748b);text-align:center;">
-      Press <kbd>?</kbd> anytime to toggle this panel
-    </div>
-  `
-
-  stAppend(panel)
-
-  const close = attachOutsideClose(panel)
-  panel.querySelector('#ss-shortcuts-close')?.addEventListener('click', () => close())
-}
-
-// ─── Color Palette Popup ──────────────────────────────────────────────
-
-// ─── Design Popup (Colors + Fonts tabs) ─────────────────────────────
-/** Close all hint-bar popups except the one with the given id */
-function closeHintPopups(exceptId?: string) {
-  ['stylesnap-design-popup', 'stylesnap-history-popup', 'stylesnap-settings-popup'].forEach(id => {
-    if (id !== exceptId) $$(id)?.remove()
-  })
-}
-
-function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
-  // Toggle: if already open, close it
-  const existing = $$('stylesnap-design-popup')
-  if (existing) { existing.remove(); return }
-  // Close other hint popups (mutually exclusive)
-  closeHintPopups('stylesnap-design-popup')
-
-  const popup = document.createElement('div')
-  popup.id = 'stylesnap-design-popup'
-  popup.setAttribute('data-stylesnap', 'true')
-  Object.assign(popup.style, {
-    position: 'fixed',
-    zIndex: '999994',
-    background: 'rgba(15, 23, 42, 0.97)',
-    border: '1px solid rgba(99, 102, 241, 0.3)',
-    borderRadius: '10px',
-    width: '300px',
-    maxHeight: '480px',
-    display: 'flex',
-    flexDirection: 'column',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#e2e8f0',
-    fontSize: '12px',
-  })
-
-  const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.06);border-radius:6px;padding:2px;'
-  const tabBtn = (tab: string, label: string, active: boolean) =>
-    `<button class="ss-dpop-tab" data-tab="${tab}" style="background:${active ? 'rgba(99,102,241,0.25)' : 'none'};border:none;color:${active ? '#e2e8f0' : '#64748b'};padding:4px 12px;border-radius:4px;font-size:11px;cursor:pointer;font-family:system-ui,sans-serif;">${label}</button>`
-
-  popup.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.06);">
-      <div style="${chipGroupStyle}">
-        ${tabBtn('colors', 'Colors', initialTab === 'colors')}
-        ${tabBtn('fonts', 'Fonts', initialTab === 'fonts')}
-      </div>
-      <button id="ss-design-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
-    </div>
-    <div id="ss-dpop-colors" style="display:${initialTab === 'colors' ? 'flex' : 'none'};flex-direction:column;flex:1;min-height:0;">
-      <div style="flex:1;overflow-y:auto;padding:10px 12px 6px;" class="ss-hint-scroll">
-        <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Extracting colors…</div>
-      </div>
-      <div id="ss-dpop-color-actions" style="display:none;flex-shrink:0;padding:8px 12px;border-top:1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex;gap:6px;">
-          <button id="ss-pal-copy-vars" style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy CSS Vars</button>
-          <button id="ss-pal-copy-json" style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy JSON</button>
-        </div>
-      </div>
-    </div>
-    <div id="ss-dpop-fonts" style="display:${initialTab === 'fonts' ? 'flex' : 'none'};flex-direction:column;flex:1;min-height:0;">
-      <div style="flex:1;overflow-y:auto;padding:10px 12px;" class="ss-hint-scroll">
-        <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Scanning fonts…</div>
-      </div>
-    </div>
-  `
-  stAppend(popup)
-
-  // Position: centered below hint bar
-  const hint = $$('stylesnap-hint-bar')
-  const pw = 300
-  if (hint) {
-    const hRect = hint.getBoundingClientRect()
-    const left = Math.max(8, Math.min(hRect.left + hRect.width / 2 - pw / 2, window.innerWidth - pw - 8))
-    popup.style.top = `${hRect.bottom + 6}px`
-    popup.style.left = `${Math.round(left)}px`
-  } else {
-    popup.style.top = '60px'
-    popup.style.left = `${Math.round(window.innerWidth / 2 - pw / 2)}px`
-  }
-
-  popup.querySelector('#ss-design-close')?.addEventListener('click', () => popup.remove())
-
-  // Tab switching — stopPropagation to prevent triggering closeOnOutside
-  popup.querySelectorAll('.ss-dpop-tab').forEach(btn => {
-    btn.addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      const tab = (btn as HTMLElement).dataset.tab as 'colors' | 'fonts'
-      popup.querySelectorAll('.ss-dpop-tab').forEach(b => {
-        ;(b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
-        ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#64748b'
-      })
-      ;(popup.querySelector('#ss-dpop-colors') as HTMLElement).style.display = tab === 'colors' ? 'flex' : 'none'
-      ;(popup.querySelector('#ss-dpop-fonts') as HTMLElement).style.display = tab === 'fonts' ? 'flex' : 'none'
-    })
-  })
-
-  // Click outside to close — leak-proof, auto-cleans on any removal path
-  attachOutsideClose(popup, { delay: 300 })
-
-  // ── Colors tab ──────────────────────────────────────────────────────
-  setTimeout(() => {
-    try {
-      // Collect colors directly via getComputedStyle — more reliable than extractDesignTokens
-      const colorMap = new Map<string, string>() // hex → original rgb string
-      const colorProps = ['color','background-color','border-top-color','border-bottom-color','border-left-color','border-right-color','outline-color','fill','stroke']
-      document.querySelectorAll('*').forEach(node => {
-        if ((node as HTMLElement).dataset?.stylesnap) return
-        if ((node as Element).id?.startsWith('stylesnap-')) return
-        const cs = window.getComputedStyle(node as HTMLElement)
-        colorProps.forEach(p => {
-          const v = cs.getPropertyValue(p)
-          if (!v || v === 'rgba(0, 0, 0, 0)' || v === 'transparent') return
-          const m = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
-          if (!m) return
-          const hex = '#' + [m[1],m[2],m[3]].map(x => parseInt(x).toString(16).padStart(2,'0')).join('')
-          if (!colorMap.has(hex)) colorMap.set(hex, v)
-        })
-      })
-      // Build simple color list
-      const colors = Array.from(colorMap.entries()).map(([hex, rgb]) => ({
-        value: hex, role: 'other' as const, rgb
-      }))
-      const colorsPanel = popup.querySelector('#ss-dpop-colors') as HTMLElement
-
-      const scrollEl = colorsPanel.querySelector('.ss-hint-scroll') as HTMLElement
-      const actionsEl = popup.querySelector('#ss-dpop-color-actions') as HTMLElement
-      if (colors.length === 0) {
-        scrollEl.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No colors found</div>`
-      } else {
-        let paletteFmt = 'hex'
-        const hexToRgb = (hex: string) => {
-          const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
-          return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] as [number,number,number] : null
-        }
-        const fmtColor = (hex: string, fmt: string) => {
-          if (fmt === 'hex') return hex
-          const rgb = hexToRgb(hex)
-          if (!rgb) return hex
-          const [r,g,b] = rgb
-          if (fmt === 'rgb') return `rgb(${r}, ${g}, ${b})`
-          const rf=r/255,gf=g/255,bf=b/255,max=Math.max(rf,gf,bf),min=Math.min(rf,gf,bf),l=(max+min)/2
-          let h=0,s=0
-          if(max!==min){const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);if(max===rf)h=((gf-bf)/d+(gf<bf?6:0))/6;else if(max===gf)h=((bf-rf)/d+2)/6;else h=((rf-gf)/d+4)/6}
-          return `hsl(${Math.round(h*360)},${Math.round(s*100)}%,${Math.round(l*100)}%)`
-        }
-        const renderGrid = () => colors.map(c => {
-          const display = fmtColor(c.value, paletteFmt)
-          return `<div class="ss-design-swatch" data-hex="${c.value}" data-display="${display}" title="${display}" style="cursor:pointer;text-align:center;"><div style="width:100%;aspect-ratio:1;border-radius:6px;background:${c.value};border:1px solid rgba(255,255,255,0.1);"></div><div style="font-size:9px;color:#94a3b8;margin-top:2px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${display}</div></div>`
-        }).join('')
-
-        scrollEl.innerHTML = `
-          <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">
-            <span style="font-size:10px;color:#64748b;">${colors.length} colors</span>
-            <div style="display:flex;gap:2px;background:rgba(255,255,255,0.05);border-radius:6px;padding:2px;margin-left:auto;">
-              ${['hex','rgb','hsl'].map(f => `<button class="ss-pal-fmt" data-fmt="${f}" style="background:${f==='hex'?'rgba(99,102,241,0.25)':'none'};color:${f==='hex'?'#e2e8f0':'#94a3b8'};border:none;border-radius:4px;padding:2px 6px;font-size:10px;font-family:monospace;cursor:pointer;">${f.toUpperCase()}</button>`).join('')}
-            </div>
-          </div>
-          <div id="ss-pal-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;">${renderGrid()}</div>
-        `
-        actionsEl.style.display = 'block'
-
-        const attachSwatchHandlers = () => {
-          scrollEl.querySelectorAll('.ss-design-swatch').forEach(sw => {
-            sw.addEventListener('click', () => {
-              const text = (sw as HTMLElement).dataset.display || (sw as HTMLElement).dataset.hex || ''
-              navigator.clipboard.writeText(text).then(() => showToast(`Copied ${text}`)).catch(() => {})
-            })
-          })
-        }
-        attachSwatchHandlers()
-        scrollEl.querySelectorAll('.ss-pal-fmt').forEach(btn => {
-          btn.addEventListener('click', () => {
-            paletteFmt = (btn as HTMLElement).dataset.fmt || 'hex'
-            scrollEl.querySelectorAll('.ss-pal-fmt').forEach(b => {
-              ;(b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
-              ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#94a3b8'
-            })
-            const grid = scrollEl.querySelector('#ss-pal-grid')
-            if (grid) { grid.innerHTML = renderGrid(); attachSwatchHandlers() }
-          })
-        })
-        popup.querySelector('#ss-pal-copy-vars')?.addEventListener('click', () => {
-          const vars = colors.map((c,i) => `  --color-${i+1}: ${c.value};`).join('\n')
-          navigator.clipboard.writeText(`:root {\n${vars}\n}`).then(() => showToast('Copied CSS variables')).catch(() => {})
-        })
-        popup.querySelector('#ss-pal-copy-json')?.addEventListener('click', () => {
-          navigator.clipboard.writeText(JSON.stringify({colors: colors.map(c => c.value)},null,2)).then(() => showToast('Copied JSON')).catch(() => {})
-        })
-      }
-    } catch { (popup.querySelector('#ss-dpop-colors .ss-hint-scroll') as HTMLElement).innerHTML = `<div style="padding:16px;text-align:center;color:#f87171;">Extraction failed</div>` }
-  }, 50)
-
-  // ── Fonts tab ───────────────────────────────────────────────────────
-  setTimeout(() => {
-    try {
-      const fontMap = new Map<string, {sizes: Set<string>, weights: Set<string>}>()
-      document.querySelectorAll('*').forEach(node => {
-        if ((node as HTMLElement).dataset?.stylesnap) return
-        if (node.id?.startsWith('stylesnap-')) return
-        const cs = window.getComputedStyle(node as HTMLElement)
-        const ff = cs.fontFamily.split(',')[0].replace(/['"]/g,'').trim()
-        if (!ff) return
-        if (!fontMap.has(ff)) fontMap.set(ff, {sizes: new Set(), weights: new Set()})
-        const entry = fontMap.get(ff)!
-        entry.sizes.add(cs.fontSize)
-        entry.weights.add(cs.fontWeight)
-      })
-      const fontsScroll = popup.querySelector('#ss-dpop-fonts .ss-hint-scroll') as HTMLElement
-      if (fontMap.size === 0) {
-        fontsScroll.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No fonts found</div>`
-        return
-      }
-      const rows = Array.from(fontMap.entries()).map(([family, data]) => {
-        const sizes = Array.from(data.sizes).sort((a,b) => parseFloat(a)-parseFloat(b)).slice(0,6).join(', ')
-        const weights = Array.from(data.weights).sort((a,b) => +a - +b).join(', ')
-        return `<div style="margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);">
-          <div style="font-weight:600;font-size:12px;color:#e2e8f0;margin-bottom:4px;">${family}</div>
-          <div style="font-size:10px;color:#94a3b8;">Sizes: ${sizes}</div>
-          <div style="font-size:10px;color:#94a3b8;">Weights: ${weights}</div>
-          <div style="margin-top:4px;font-family:${family};font-size:13px;color:#cbd5e1;">The quick brown fox</div>
-        </div>`
-      }).join('')
-      fontsScroll.innerHTML = `<div style="font-size:10px;color:#64748b;margin-bottom:8px;">${fontMap.size} font families</div>${rows}`
-    } catch { /* noop */ }
-  }, 80)
-}
-
-
-// ─── History Panel (Feature 4) ────────────────────────────────────────
+// ─── History Panel ────────────────────────────────────────────────────
 function showHistoryPanel() {
   const existing = $$('stylesnap-history-popup')
   if (existing) { existing.remove(); return }
@@ -2027,8 +1466,8 @@ function showHistoryPanel() {
   }
 
   const renderItems = () => {
-    if (_history.length === 0) return `<div style="padding:16px;text-align:center;color:#94a3b8;">No history yet — lock elements with click</div>`
-    return _history.map((item, i) => `
+    if (S.history.length === 0) return `<div style="padding:16px;text-align:center;color:#94a3b8;">No history yet — lock elements with click</div>`
+    return S.history.map((item, i) => `
       <div class="ss-history-item" data-idx="${i}" style="margin-bottom:6px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);cursor:pointer;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span style="font-weight:600;font-size:11px;color:#a5b4fc;">&lt;${item.tag}&gt;</span>
@@ -2042,7 +1481,7 @@ function showHistoryPanel() {
   popup.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
       <span style="font-weight:600;font-size:13px;">History</span>
-      <span style="font-size:11px;color:#64748b;">${_history.length} items</span>
+      <span style="font-size:11px;color:#64748b;">${S.history.length} items</span>
       <button id="ss-history-close" style="margin-left:auto;background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
     </div>
     <div id="ss-history-list">${renderItems()}</div>
@@ -2054,7 +1493,7 @@ function showHistoryPanel() {
   popup.querySelectorAll('.ss-history-item').forEach(item => {
     item.addEventListener('click', () => {
       const idx = parseInt((item as HTMLElement).dataset.idx || '0')
-      const snap = _history[idx]
+      const snap = S.history[idx]
       if (!snap) return
       popup.remove()
       // Prefer the exact element we locked before (stored reference); only fall
@@ -2066,7 +1505,7 @@ function showHistoryPanel() {
         unlockElement()
         lockElement(target as Element)
         const parsedCSS = parseElement(target)
-        _lastParsedCSS = parsedCSS
+        S.lastParsedCSS = parsedCSS
         showOverlay(target, parsedCSS)
         showToast(`Re-locked <${snap.tag}>`)
       } else {
@@ -2080,286 +1519,6 @@ function showHistoryPanel() {
 
 // ─── Export Dropdown Menu ─────────────────────────────────────────────
 
-// ─── CSS → Tailwind mapping ─────────────────────────────────────────
-// Extracts design tokens from computed styles and maps them to Tailwind classes.
-
-const TW_COLORS: Record<string, string[]> = {
-  '#fef2f2': ['red-50'], '#fee2e2': ['red-100'], '#fecaca': ['red-200'], '#fca5a5': ['red-300'],
-  '#f87171': ['red-400'], '#ef4444': ['red-500'], '#dc2626': ['red-600'], '#b91c1c': ['red-700'],
-  '#991b1b': ['red-800'], '#7f1d1d': ['red-900'],
-  '#fff7ed': ['orange-50'], '#ffedd5': ['orange-100'], '#fed7aa': ['orange-200'], '#fdba74': ['orange-300'],
-  '#fb923c': ['orange-400'], '#f97316': ['orange-500'], '#ea580c': ['orange-600'], '#c2410c': ['orange-700'],
-  '#9a3412': ['orange-800'], '#7c2d12': ['orange-900'],
-  '#fffbeb': ['amber-50'], '#fef3c7': ['amber-100'], '#fde68a': ['amber-200'], '#fcd34d': ['amber-300'],
-  '#fbbf24': ['amber-400'], '#f59e0b': ['amber-500'], '#d97706': ['amber-600'], '#b45309': ['amber-700'],
-  '#92400e': ['amber-800'], '#78350f': ['amber-900'],
-  '#fefce8': ['yellow-50'], '#fef9c3': ['yellow-100'], '#fef08a': ['yellow-200'], '#fde047': ['yellow-300'],
-  '#facc15': ['yellow-400'], '#eab308': ['yellow-500'], '#ca8a04': ['yellow-600'], '#a16207': ['yellow-700'],
-  '#854d0e': ['yellow-800'], '#713f12': ['yellow-900'],
-  '#f7fee7': ['lime-50'], '#ecfccb': ['lime-100'], '#d9f99d': ['lime-200'], '#bef264': ['lime-300'],
-  '#a3e635': ['lime-400'], '#84cc16': ['lime-500'], '#65a30d': ['lime-600'], '#4d7c0f': ['lime-700'],
-  '#3f6212': ['lime-800'], '#365314': ['lime-900'],
-  '#f0fdf4': ['green-50'], '#dcfce7': ['green-100'], '#bbf7d0': ['green-200'], '#86efac': ['green-300'],
-  '#4ade80': ['green-400'], '#22c55e': ['green-500'], '#16a34a': ['green-600'], '#15803d': ['green-700'],
-  '#166534': ['green-800'], '#14532d': ['green-900'],
-  '#ecfdf5': ['emerald-50'], '#d1fae5': ['emerald-100'], '#a7f3d0': ['emerald-200'], '#6ee7b7': ['emerald-300'],
-  '#34d399': ['emerald-400'], '#10b981': ['emerald-500'], '#059669': ['emerald-600'], '#047857': ['emerald-700'],
-  '#065f46': ['emerald-800'], '#064e3b': ['emerald-900'],
-  '#f0fdfa': ['teal-50'], '#ccfbf1': ['teal-100'], '#99f6e4': ['teal-200'], '#5eead4': ['teal-300'],
-  '#2dd4bf': ['teal-400'], '#14b8a6': ['teal-500'], '#0d9488': ['teal-600'], '#0f766e': ['teal-700'],
-  '#115e59': ['teal-800'], '#134e4a': ['teal-900'],
-  '#ecfeff': ['cyan-50'], '#cffafe': ['cyan-100'], '#a5f3fc': ['cyan-200'], '#67e8f9': ['cyan-300'],
-  '#22d3ee': ['cyan-400'], '#06b6d4': ['cyan-500'], '#0891b2': ['cyan-600'], '#0e7490': ['cyan-700'],
-  '#155e75': ['cyan-800'], '#164e63': ['cyan-900'],
-  '#f0f9ff': ['sky-50'], '#e0f2fe': ['sky-100'], '#bae6fd': ['sky-200'], '#7dd3fc': ['sky-300'],
-  '#38bdf8': ['sky-400'], '#0ea5e9': ['sky-500'], '#0284c7': ['sky-600'], '#0369a1': ['sky-700'],
-  '#075985': ['sky-800'], '#0c4a6e': ['sky-900'],
-  '#eff6ff': ['blue-50'], '#dbeafe': ['blue-100'], '#bfdbfe': ['blue-200'], '#93c5fd': ['blue-300'],
-  '#60a5fa': ['blue-400'], '#3b82f6': ['blue-500'], '#2563eb': ['blue-600'], '#1d4ed8': ['blue-700'],
-  '#1e40af': ['blue-800'], '#1e3a8a': ['blue-900'],
-  '#eef2ff': ['indigo-50'], '#e0e7ff': ['indigo-100'], '#c7d2fe': ['indigo-200'], '#a5b4fc': ['indigo-300'],
-  '#818cf8': ['indigo-400'], '#6366f1': ['indigo-500'], '#4f46e5': ['indigo-600'], '#4338ca': ['indigo-700'],
-  '#3730a3': ['indigo-800'], '#312e81': ['indigo-900'],
-  '#f5f3ff': ['violet-50'], '#ede9fe': ['violet-100'], '#ddd6fe': ['violet-200'], '#c4b5fd': ['violet-300'],
-  '#a78bfa': ['violet-400'], '#8b5cf6': ['violet-500'], '#7c3aed': ['violet-600'], '#6d28d9': ['violet-700'],
-  '#5b21b6': ['violet-800'], '#4c1d95': ['violet-900'],
-  '#faf5ff': ['purple-50'], '#f3e8ff': ['purple-100'], '#e9d5ff': ['purple-200'], '#d8b4fe': ['purple-300'],
-  '#c084fc': ['purple-400'], '#a855f7': ['purple-500'], '#9333ea': ['purple-600'], '#7e22ce': ['purple-700'],
-  '#6b21a8': ['purple-800'], '#581c87': ['purple-900'],
-  '#fdf4ff': ['fuchsia-50'], '#fae8ff': ['fuchsia-100'], '#f5d0fe': ['fuchsia-200'], '#f0abfc': ['fuchsia-300'],
-  '#e879f9': ['fuchsia-400'], '#d946ef': ['fuchsia-500'], '#c026d3': ['fuchsia-600'], '#a21caf': ['fuchsia-700'],
-  '#86198f': ['fuchsia-800'], '#701a75': ['fuchsia-900'],
-  '#fdf2f8': ['pink-50'], '#fce7f3': ['pink-100'], '#fbcfe8': ['pink-200'], '#f9a8d4': ['pink-300'],
-  '#f472b6': ['pink-400'], '#ec4899': ['pink-500'], '#db2777': ['pink-600'], '#be185d': ['pink-700'],
-  '#9d174d': ['pink-800'], '#831843': ['pink-900'],
-  '#fff1f2': ['rose-50'], '#ffe4e6': ['rose-100'], '#fecdd3': ['rose-200'], '#fda4af': ['rose-300'],
-  '#fb7185': ['rose-400'], '#f43f5e': ['rose-500'], '#e11d48': ['rose-600'], '#be123c': ['rose-700'],
-  '#9f1239': ['rose-800'], '#881337': ['rose-900'],
-  '#f8fafc': ['slate-50'], '#f1f5f9': ['slate-100'], '#e2e8f0': ['slate-200'], '#cbd5e1': ['slate-300'],
-  '#94a3b8': ['slate-400'], '#64748b': ['slate-500'], '#475569': ['slate-600'], '#334155': ['slate-700'],
-  '#1e293b': ['slate-800'], '#0f172a': ['slate-900'],
-  '#f9fafb': ['gray-50'], '#f3f4f6': ['gray-100'], '#e5e7eb': ['gray-200'], '#d1d5db': ['gray-300'],
-  '#9ca3af': ['gray-400'], '#6b7280': ['gray-500'], '#4b5563': ['gray-600'], '#374151': ['gray-700'],
-  '#1f2937': ['gray-800'], '#111827': ['gray-900'],
-  '#fafafa': ['neutral-50'], '#f5f5f5': ['neutral-100'], '#e5e5e5': ['neutral-200'], '#d4d4d4': ['neutral-300'],
-  '#a3a3a3': ['neutral-400'], '#737373': ['neutral-500'], '#525252': ['neutral-600'], '#404040': ['neutral-700'],
-  '#262626': ['neutral-800'], '#171717': ['neutral-900'],
-  '#f4f4f5': ['zinc-100'], '#e4e4e7': ['zinc-200'], '#d4d4d8': ['zinc-300'], '#a1a1aa': ['zinc-400'],
-  '#71717a': ['zinc-500'], '#52525b': ['zinc-600'], '#3f3f46': ['zinc-700'], '#27272a': ['zinc-800'],
-  '#18181b': ['zinc-900'],
-  '#ffffff': ['white'], '#fff': ['white'],
-  '#000000': ['black'], '#000': ['black'],
-  'transparent': ['transparent'], 'currentcolor': ['current'],
-}
-
-// Convert #rgb / #rrggbb to lowercase hex for lookup
-function normalizeHex(val: string): string {
-  if (val === 'transparent' || val === 'currentcolor') return val
-  if (val.startsWith('#')) {
-    const m = val.match(/^#([0-9a-fA-F]{3,8})$/)
-    if (!m) return val.toLowerCase()
-    const hex = m[1]
-    if (hex.length === 3) return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
-    if (hex.length === 4) return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
-    if (hex.length === 8) return `#${hex.slice(0, 6)}`
-    return `#${hex}`
-  }
-  // rgb / rgba
-  const m = val.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
-  if (m) {
-    const r = parseInt(m[1], 10), g = parseInt(m[2], 10), b = parseInt(m[3], 10)
-    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
-  }
-  return val.toLowerCase()
-}
-
-function matchColor(val: string): string | null {
-  const hex = normalizeHex(val)
-  return TW_COLORS[hex]?.[0] ?? null
-}
-
-// px → Tailwind spacing scale (4px = 1 unit)
-const TW_SPACING: [number, string][] = [
-  [0, '0'], [2, '0.5'], [4, '1'], [6, '1.5'], [8, '2'], [10, '2.5'], [12, '3'], [14, '3.5'],
-  [16, '4'], [20, '5'], [24, '6'], [28, '7'], [32, '8'], [36, '9'], [40, '10'], [44, '11'],
-  [48, '12'], [56, '14'], [64, '16'], [72, '18'], [80, '20'], [96, '24'], [112, '28'],
-  [128, '32'], [144, '36'], [160, '40'], [176, '44'], [192, '48'], [208, '52'], [224, '56'],
-  [240, '60'], [256, '64'], [288, '72'], [320, '80'], [384, '96'],
-]
-
-function matchSpacing(px: number): string | null {
-  for (let i = TW_SPACING.length - 1; i >= 0; i--) {
-    if (px >= TW_SPACING[i][0] - 0.5 && px <= TW_SPACING[i][0] + 0.5) return TW_SPACING[i][1]
-  }
-  return null
-}
-
-const TW_FONT_SIZE: [string, number][] = [
-  ['xs', 12], ['sm', 14], ['base', 16], ['lg', 18], ['xl', 20],
-  ['2xl', 24], ['3xl', 30], ['4xl', 36], ['5xl', 48], ['6xl', 60], ['7xl', 72], ['8xl', 96], ['9xl', 128],
-]
-const TW_FONT_WEIGHT: Record<string, string> = { '100': 'thin', '200': 'extralight', '300': 'light', '400': 'normal', '500': 'medium', '600': 'semibold', '700': 'bold', '800': 'extrabold', '900': 'black' }
-const TW_BORDER_RADIUS: [string, number][] = [
-  ['none', 0], ['sm', 2], ['', 4], ['md', 6], ['lg', 8], ['xl', 12], ['2xl', 16], ['3xl', 24],
-]
-const TW_SHADOW: Record<string, string> = {
-  '0 1px 2px 0 rgba(0,0,0,0.05)': 'sm', '0 1px 3px 0 rgba(0,0,0,0.1)': 'DEFAULT',
-  '0 4px 6px -1px rgba(0,0,0,0.1)': 'md', '0 10px 15px -3px rgba(0,0,0,0.1)': 'lg',
-  '0 20px 25px -5px rgba(0,0,0,0.1)': 'xl', '0 25px 50px -12px rgba(0,0,0,0.25)': '2xl',
-}
-
-function mapCSSToTailwind(styles: CSSStyleDeclaration): string[] {
-  const classes: string[] = []
-  const props = new Map<string, string>()
-  for (let i = 0; i < styles.length; i++) {
-    const p = styles[i]
-    const v = styles.getPropertyValue(p)
-    if (v && !['initial', 'none', 'auto', 'normal'].includes(v) && v !== 'rgba(0, 0, 0, 0)') {
-      props.set(p, v)
-    }
-  }
-
-  // Color props
-  for (const [cssProp, twPrefix] of [['color', 'text'], ['background-color', 'bg'], ['border-color', 'border']] as const) {
-    const val = props.get(cssProp)
-    if (val) {
-      const c = matchColor(val)
-      if (c) classes.push(`${twPrefix}-${c}`)
-    }
-  }
-
-  // Spacing: padding / margin / gap / width / height
-  for (const [cssProp, twPrefix] of [
-    ['padding', 'p'], ['padding-top', 'pt'], ['padding-right', 'pr'], ['padding-bottom', 'pb'], ['padding-left', 'pl'],
-    ['padding-inline', 'px'], ['padding-block', 'py'],
-    ['margin', 'm'], ['margin-top', 'mt'], ['margin-right', 'mr'], ['margin-bottom', 'mb'], ['margin-left', 'ml'],
-    ['gap', 'gap'], ['row-gap', 'gap-y'], ['column-gap', 'gap-x'],
-    ['width', 'w'], ['min-width', 'min-w'], ['max-width', 'max-w'],
-    ['height', 'h'], ['min-height', 'min-h'], ['max-height', 'max-h'],
-  ] as const) {
-    const val = props.get(cssProp)
-    if (val) {
-      const px = parseFloat(val)
-      if (!isNaN(px)) {
-        const s = matchSpacing(px)
-        if (s) classes.push(`${twPrefix}-${s}`)
-      }
-    }
-  }
-
-  // Font size
-  const fontSize = props.get('font-size')
-  if (fontSize) {
-    const px = parseFloat(fontSize)
-    if (!isNaN(px)) {
-      for (const [name, size] of TW_FONT_SIZE) {
-        if (Math.abs(px - size) <= 1) { classes.push(`text-${name}`); break }
-      }
-    }
-  }
-
-  // Font weight
-  const fontWeight = props.get('font-weight')
-  if (fontWeight && TW_FONT_WEIGHT[fontWeight]) classes.push(`font-${TW_FONT_WEIGHT[fontWeight]}`)
-
-  // Line height
-  const lineHeight = props.get('line-height')
-  if (lineHeight) {
-    const n = parseFloat(lineHeight)
-    if (!isNaN(n)) {
-      if (n >= 2.4 && n <= 2.6) classes.push('leading-loose')
-      else if (n >= 1.6 && n <= 1.8) classes.push('leading-relaxed')
-      else if (n >= 1.4 && n <= 1.55) classes.push('leading-normal')
-      else if (n >= 1.2 && n <= 1.35) classes.push('leading-snug')
-      else if (n >= 0.95 && n <= 1.1) classes.push('leading-tight')
-      else {
-        // Try px matching
-        const s = matchSpacing(n)
-        if (s) classes.push(`leading-[${n}px]`)
-        else classes.push(`leading-[${n}]`)
-      }
-    }
-  }
-
-  // Border radius
-  const borderRadius = props.get('border-radius')
-  if (borderRadius) {
-    const px = parseFloat(borderRadius)
-    if (!isNaN(px)) {
-      if (px >= 999) classes.push('rounded-full')
-      else {
-        for (const [name, size] of TW_BORDER_RADIUS) {
-          if (Math.abs(px - size) <= 1) { classes.push(name ? `rounded-${name}` : 'rounded'); break }
-        }
-      }
-    }
-  }
-
-  // Display
-  const display = props.get('display')
-  if (display === 'flex') classes.push('flex')
-  else if (display === 'grid') classes.push('grid')
-  else if (display === 'block') classes.push('block')
-  else if (display === 'inline-block') classes.push('inline-block')
-  else if (display === 'inline') classes.push('inline')
-  else if (display === 'inline-flex') classes.push('inline-flex')
-  else if (display === 'none') classes.push('hidden')
-
-  // Flex direction
-  const flexDir = props.get('flex-direction')
-  if (flexDir === 'column') classes.push('flex-col')
-  else if (flexDir === 'row') classes.push('flex-row')
-  else if (flexDir === 'column-reverse') classes.push('flex-col-reverse')
-
-  // Align / Justify
-  const alignMap: Record<string, string> = { 'center': 'center', 'flex-start': 'start', 'flex-end': 'end', 'stretch': 'stretch', 'space-between': 'between', 'space-around': 'around', 'space-evenly': 'evenly' }
-  const alignItems = props.get('align-items')
-  if (alignItems && alignMap[alignItems]) classes.push(`items-${alignMap[alignItems]}`)
-  const justifyContent = props.get('justify-content')
-  if (justifyContent && alignMap[justifyContent]) classes.push(`justify-${alignMap[justifyContent]}`)
-
-  // Text align
-  const textAlign = props.get('text-align')
-  if (textAlign === 'center') classes.push('text-center')
-  else if (textAlign === 'right') classes.push('text-right')
-  else if (textAlign === 'justify') classes.push('text-justify')
-
-  // Cursor
-  const cursor = props.get('cursor')
-  if (cursor === 'pointer') classes.push('cursor-pointer')
-  else if (cursor === 'not-allowed') classes.push('cursor-not-allowed')
-  else if (cursor === 'wait') classes.push('cursor-wait')
-
-  // Opacity
-  const opacity = props.get('opacity')
-  if (opacity && opacity !== '1') {
-    const n = parseInt(String(parseFloat(opacity) * 100))
-    if (!isNaN(n) && n % 5 === 0 && n <= 100) classes.push(`opacity-${n}`)
-  }
-
-  // Box shadow
-  const boxShadow = props.get('box-shadow')
-  if (boxShadow && boxShadow !== 'none') {
-    const matched = TW_SHADOW[boxShadow]
-    if (matched) classes.push(matched === 'DEFAULT' ? 'shadow' : `shadow-${matched}`)
-    else classes.push('shadow-lg') // best-effort fallback
-  }
-
-  // Position
-  const position = props.get('position')
-  if (position === 'relative') classes.push('relative')
-  else if (position === 'absolute') classes.push('absolute')
-  else if (position === 'fixed') classes.push('fixed')
-  else if (position === 'sticky') classes.push('sticky')
-
-  // Overflow
-  const overflow = props.get('overflow')
-  if (overflow === 'hidden') classes.push('overflow-hidden')
-  else if (overflow === 'auto') classes.push('overflow-auto')
-  else if (overflow === 'scroll') classes.push('overflow-scroll')
-
-  return classes
-}
 
 // ─── CodePen Export Helpers ─────────────────────────────────────────
 
@@ -2563,13 +1722,6 @@ function getComponentCSSForExport(el: Element): string {
   return cssLines.join('\n\n')
 }
 
-function getTailwindClasses(el: Element): string {
-  const htmlEl = el as HTMLElement
-  htmlEl.classList.remove(LOCKED_CLASS)
-  const styles = window.getComputedStyle(htmlEl)
-  htmlEl.classList.add(LOCKED_CLASS)
-  return mapCSSToTailwind(styles).join(' ')
-}
 
 function submitCodePen(data: Record<string, string>) {
   const form = document.createElement('form')
@@ -2589,7 +1741,7 @@ function submitCodePen(data: Record<string, string>) {
 }
 
 function exportCSSToCodePen() {
-  const el = lockedElement as HTMLElement
+  const el = S.lockedElement as HTMLElement
   if (!el) return
   const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
   submitCodePen({
@@ -2638,1081 +1790,10 @@ function extractPseudoFromSelector(selector: string): string | null {
   return m ? m[1] : null
 }
 
-// ─── Settings Popup ───────────────────────────────────────────────────
-
-// ─── AI Component Generator ──────────────────────────────────────────
-
-function extractARIA(el: Element, depth = 0): string {
-  if (depth > 10) return ''
-  const lines: string[] = []
-  const ariaAttrs = el.getAttributeNames().filter(a => a.startsWith('aria-') || a === 'role')
-  const tag = el.tagName.toLowerCase()
-  const id = el.id ? `#${el.id}` : ''
-  const classes = classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).join('.')
-  const sel = id || (classes ? `${tag}.${classes}` : tag)
-
-  if (ariaAttrs.length > 0) {
-    const attrs = ariaAttrs.map(a => `  ${a}="${el.getAttribute(a)}"`).join('\n')
-    lines.push(`<${sel}>\n${attrs}`)
-  }
-
-  for (const child of Array.from(el.children)) {
-    const c = extractARIA(child, depth + 1)
-    if (c) lines.push(c)
-  }
-  return lines.join('\n')
-}
-
-function extractDOMSummary(el: Element, depth = 0): string {
-  if (depth > 6) return ''
-  const tag = el.tagName.toLowerCase()
-  const id = el.id ? ` id="${el.id}"` : ''
-  const cls = classNameOf(el).replace(/stylesnap-\S+/g, '').trim()
-  const classStr = cls ? ` class="${cls}"` : ''
-  const children = Array.from(el.children).slice(0, 8)
-    .map(c => extractDOMSummary(c, depth + 1))
-    .filter(Boolean)
-    .join('')
-  const indent = '  '.repeat(depth)
-  if (children) {
-    return `${indent}<${tag}${id}${classStr}>\n${children}${indent}</${tag}>\n`
-  }
-  const text = (el.textContent || '').trim().substring(0, 60)
-  return `${indent}<${tag}${id}${classStr}>${text ? ` ${text} ` : ''}</${tag}>\n`
-}
-
-function extractAnimations(el: Element): string {
-  const anims = (el as HTMLElement).getAnimations?.() || []
-  if (anims.length === 0) return ''
-  return anims.map(a => {
-    const effect = a.effect as KeyframeEffect | null
-    const timing = effect?.getTiming() || {}
-    const kfs = effect?.getKeyframes() || []
-    const kfLines = kfs.map((k, i) => {
-      const pct = k.offset !== undefined ? `${Math.round((k.offset as number) * 100)}%` : i === 0 ? '0%' : '100%'
-      const props = Object.entries(k).filter(([key]) => key !== 'offset' && key !== 'computedOffset' && key !== 'easing').map(([k, v]) => `    ${k}: ${v}`).join(';\n')
-      return `  ${pct} {\n${props};\n  }`
-    }).join('\n')
-    return `@keyframes ${a.id || 'anim'} {\n${kfLines}\n}\nanimation: ${a.id || 'anim'} ${timing.duration || 300}ms ${timing.easing || 'ease'} ${timing.iterations === Infinity ? 'infinite' : ''}`
-  }).join('\n\n')
-}
-
-function showAIPrompt() {
-  if (!lockedElement) { showToast('Lock an element first'); return }
-
-  const el = lockedElement as HTMLElement
-  el.classList.remove(LOCKED_CLASS)
-  const styles = window.getComputedStyle(el)
-  el.classList.add(LOCKED_CLASS)
-
-  const tw = mapCSSToTailwind(styles)
-  const dom = extractDOMSummary(el)
-  const aria = extractARIA(el)
-  const anim = extractAnimations(el)
-  const tagName = el.tagName.toLowerCase()
-  const twClassStr = tw.join(' ')
-  const cssProps = _lastParsedCSS?.styles
-    ? Object.entries(_lastParsedCSS.styles).slice(0, 30).map(([k, v]) => `  ${k}: ${v};`).join('\n')
-    : ''
-
-  const elementContext = [
-    `Tag: <${tagName}>`,
-    el.id ? `ID: #${el.id}` : '',
-    twClassStr ? `Tailwind classes: ${twClassStr}` : '',
-    cssProps ? `\nKey CSS:\n${cssProps}` : '',
-    anim ? `\nAnimations:\n${anim}` : '',
-    `\nDOM structure:\n${dom || `<${tagName} />`}`,
-    aria ? `\nARIA:\n${aria}` : '',
-  ].filter(Boolean).join('\n')
-
-  const buildPrompt = (framework: 'react' | 'vue' | 'html'): string => {
-    if (framework === 'react') return `You are a frontend expert. Convert the following element into a production-ready React component using TypeScript and Tailwind CSS.
-
-${elementContext}
-
-Requirements:
-- React functional component with TypeScript
-- Use all Tailwind classes exactly as provided
-- Preserve DOM structure and ARIA attributes for accessibility
-- Export as default
-- No explanation — output ONLY TSX code in a markdown code block`
-
-    if (framework === 'vue') return `You are a frontend expert. Convert the following element into a Vue 3 component using Tailwind CSS.
-
-${elementContext}
-
-Requirements:
-- Vue 3 <script setup lang="ts"> syntax
-- Use all Tailwind classes exactly as provided
-- Preserve DOM structure and ARIA attributes for accessibility
-- No explanation — output ONLY Vue SFC code in a markdown code block`
-
-    return `You are a frontend expert. Convert the following element into clean semantic HTML with Tailwind CSS.
-
-${elementContext}
-
-Requirements:
-- Clean, semantic HTML5
-- Use all Tailwind classes exactly as provided
-- Preserve ARIA attributes for accessibility
-- No explanation — output ONLY HTML code in a markdown code block`
-  }
-
-  $$('stylesnap-ai-prompt-panel')?.remove()
-
-  const panel = document.createElement('div')
-  panel.id = 'stylesnap-ai-prompt-panel'
-  panel.setAttribute('data-stylesnap', 'true')
-
-  let currentFw: 'react' | 'vue' | 'html' = 'react'
-
-  const SVG_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
-
-  const render = () => {
-    const tabs: Array<{id: 'react'|'vue'|'html'; label: string}> = [
-      {id: 'react', label: 'React / TSX'},
-      {id: 'vue',   label: 'Vue 3'},
-      {id: 'html',  label: 'HTML'},
-    ]
-    panel.innerHTML = `
-      <div id="ss-ai-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999996;"></div>
-      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(660px,92vw);max-height:82vh;background:rgba(15,23,42,0.98);border:1px solid rgba(99,102,241,0.28);border-radius:10px;display:flex;flex-direction:column;z-index:9999997;box-shadow:0 8px 48px rgba(0,0,0,0.55);font-family:system-ui,sans-serif;overflow:hidden;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.06);">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M12 3 9.2 8.5 3.3 9.6l4.2 4.3-1 6.1 5.5-2.9 5.5 2.9-1-6.1 4.2-4.3-5.9-1.1Z"/></svg>
-            <span style="font-size:13px;font-weight:600;color:#e2e8f0;">AI Prompt</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="font-size:10px;color:#475569;">Paste into Claude, ChatGPT, or Cursor</span>
-            <button id="ss-ai-close" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;padding:0 2px;line-height:1;">&times;</button>
-          </div>
-        </div>
-        <div style="display:flex;gap:4px;padding:10px 16px 0;">
-          ${tabs.map(t => `<button data-fw="${t.id}" style="background:${t.id===currentFw ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)'};border:1px solid ${t.id===currentFw ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'};color:${t.id===currentFw ? '#a5b4fc' : '#64748b'};border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.12s;">${t.label}</button>`).join('')}
-        </div>
-        <div style="flex:1;overflow:auto;padding:10px 16px;">
-          <textarea id="ss-ai-textarea" readonly style="width:100%;height:300px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.07);border-radius:6px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.65;padding:10px 12px;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
-        </div>
-        <div style="padding:10px 16px 14px;display:flex;align-items:center;justify-content:flex-end;border-top:1px solid rgba(255,255,255,0.06);">
-          <button id="ss-ai-copy" style="display:flex;align-items:center;gap:6px;background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.38);color:#a5b4fc;border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;transition:all 0.15s;">${SVG_COPY} Copy Prompt</button>
-        </div>
-      </div>
-    `
-    // Set textarea value directly to avoid HTML entity issues
-    const ta = panel.querySelector('#ss-ai-textarea') as HTMLTextAreaElement
-    if (ta) ta.value = buildPrompt(currentFw)
-
-    panel.querySelector('#ss-ai-close')?.addEventListener('click', () => panel.remove())
-    panel.querySelector('#ss-ai-backdrop')?.addEventListener('click', () => panel.remove())
-
-    panel.querySelectorAll('[data-fw]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        currentFw = (btn as HTMLElement).dataset.fw as 'react' | 'vue' | 'html'
-        render()
-      })
-    })
-
-    panel.querySelector('#ss-ai-copy')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(buildPrompt(currentFw)).then(() => {
-        const btn = panel.querySelector('#ss-ai-copy') as HTMLElement | null
-        if (!btn) return
-        // Restore only the button — never rebuild the whole panel (avoids resetting
-        // the user's tab choice or resurrecting a closed panel).
-        const origHTML = btn.innerHTML, origBg = btn.style.background, origBorder = btn.style.borderColor, origColor = btn.style.color
-        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> Copied!`
-        btn.style.background = 'rgba(52,211,153,0.18)'
-        btn.style.borderColor = 'rgba(52,211,153,0.4)'
-        btn.style.color = '#34d399'
-        setTimeout(() => {
-          if (!btn.isConnected) return
-          btn.innerHTML = origHTML
-          btn.style.background = origBg
-          btn.style.borderColor = origBorder
-          btn.style.color = origColor
-        }, 1800)
-      }).catch(() => showToast('Copy failed'))
-    })
-  }
-
-  render()
-  stAppend(panel)
-}
-
-// ─── Preview Panel ────────────────────────────────────────────────────
-
-function showPreviewPanel(opts: {
-  code: string
-  type: 'component' | 'css' | 'tailwind' | 'json'
-  title?: string
-  previewHTML?: string
-  previewCSS?: string
-}) {
-  const { code, type } = opts
-  const title = opts.title || 'Preview'
-
-  // Remove any existing preview panel
-  const existing = $$('stylesnap-preview-panel')
-  if (existing) existing.remove()
-
-  // Panel (position:fixed with max z-index — floats above inspector overlay)
-  const panel = document.createElement('div')
-  panel.id = 'stylesnap-preview-panel'
-  panel.setAttribute('data-stylesnap', 'true')
-  const panelW = Math.min(window.innerWidth * 0.88, 1100)
-  const panelH = Math.min(window.innerHeight * 0.78, 800)
-  Object.assign(panel.style, {
-    position: 'fixed',
-    left: `${Math.round((window.innerWidth - panelW) / 2)}px`,
-    top: `${Math.round((window.innerHeight - panelH) / 2)}px`,
-    width: `${panelW}px`,
-    height: `${panelH}px`,
-    maxWidth: '1100px',
-    maxHeight: '800px',
-    zIndex: '9999998',
-    background: 'rgba(15, 23, 42, 0.98)',
-    border: '1px solid rgba(99, 102, 241, 0.3)',
-    borderRadius: '10px',
-    display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    fontFamily: 'system-ui, sans-serif',
-    boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
-  })
-
-  // ─── Header ───
-  const header = document.createElement('div')
-  Object.assign(header.style, {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)',
-    flexShrink: '0',
-  })
-  header.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="color:#e2e8f0;font-weight:600;font-size:13px;">${title}</span>
-      <span style="background:rgba(99,102,241,0.2);color:#a5b4fc;font-size:10px;padding:2px 8px;border-radius:4px;font-weight:500;">${type.toUpperCase()}</span>
-    </div>
-    <div style="display:flex;align-items:center;gap:6px;">
-      <button id="ss-preview-copy" style="background:rgba(99,102,241,0.15);color:#a5b4fc;border:1px solid rgba(99,102,241,0.2);padding:5px 12px;border-radius:5px;cursor:pointer;font-size:11px;font-family:system-ui,sans-serif;">📋 Copy</button>
-      ${type === 'css' || type === 'tailwind' ? `<button id="ss-preview-codepen" style="background:rgba(52,211,153,0.12);color:#34d399;border:1px solid rgba(52,211,153,0.2);padding:5px 12px;border-radius:5px;cursor:pointer;font-size:11px;font-family:system-ui,sans-serif;">⚡ CodePen</button>` : ''}
-      <button id="ss-preview-close" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;padding:0 4px;line-height:1;">&times;</button>
-    </div>
-  `
-
-  // ─── Body (split view) ───
-  const body = document.createElement('div')
-  Object.assign(body.style, {
-    display: 'flex', flex: '1', overflow: 'hidden', minHeight: '0',
-  })
-
-  // Left: Live preview
-  const previewSide = document.createElement('div')
-  Object.assign(previewSide.style, {
-    flex: '1', minWidth: '0', borderRight: '1px solid rgba(255,255,255,0.06)',
-    display: 'flex', flexDirection: 'column',
-  })
-  const previewLabel = document.createElement('div')
-  previewLabel.textContent = 'Preview'
-  Object.assign(previewLabel.style, {
-    padding: '6px 12px', fontSize: '10px', color: '#64748b',
-    borderBottom: '1px solid rgba(255,255,255,0.04)', flexShrink: '0',
-    background: 'rgba(255,255,255,0.02)',
-  })
-  const iframe = document.createElement('iframe')
-  iframe.id = 'ss-preview-iframe'
-  iframe.setAttribute('sandbox', 'allow-scripts')
-  Object.assign(iframe.style, { flex: '1', border: 'none', background: '#fff', width: '100%' })
-  previewSide.appendChild(previewLabel)
-  previewSide.appendChild(iframe)
-
-  // Right: Code editor
-  const codeSide = document.createElement('div')
-  Object.assign(codeSide.style, {
-    flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column',
-  })
-  const codeLabel = document.createElement('div')
-  codeLabel.textContent = type === 'json' ? 'JSON' : type === 'component' ? 'React + Tailwind' : type === 'tailwind' ? 'Tailwind Classes' : 'CSS'
-  Object.assign(codeLabel.style, {
-    padding: '6px 12px', fontSize: '10px', color: '#64748b',
-    borderBottom: '1px solid rgba(255,255,255,0.04)', flexShrink: '0',
-    background: 'rgba(255,255,255,0.02)',
-  })
-  const textarea = document.createElement('textarea')
-  textarea.id = 'ss-preview-textarea'
-  textarea.value = code
-  textarea.setAttribute('spellcheck', 'false')
-  Object.assign(textarea.style, {
-    flex: '1', background: 'rgba(0,0,0,0.2)', color: '#e2e8f0',
-    border: 'none', padding: '12px', fontSize: '12px', fontFamily: '"JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace',
-    resize: 'none', outline: 'none', lineHeight: '1.6', tabSize: '2',
-    whiteSpace: 'pre', overflowWrap: 'normal', overflowX: 'auto',
-  })
-  codeSide.appendChild(codeLabel)
-  codeSide.appendChild(textarea)
-
-  body.appendChild(previewSide)
-  body.appendChild(codeSide)
-  panel.appendChild(header)
-  panel.appendChild(body)
-  stAppend(panel)
-
-  // ─── Render preview ───
-  const updatePreview = () => {
-    const currentCode = textarea.value
-    iframe.srcdoc = buildPreviewDoc(currentCode, type, opts.previewHTML, opts.previewCSS)
-  }
-  updatePreview()
-
-  // Debounced preview update on input
-  let debounceTimer: ReturnType<typeof setTimeout>
-  textarea.addEventListener('input', () => {
-    clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(updatePreview, 400)
-  })
-
-  // ─── Buttons ───
-  panel.querySelector('#ss-preview-copy')?.addEventListener('click', () => {
-    navigator.clipboard.writeText(textarea.value).then(() => showToast('Copied!'))
-      .catch(() => showToast('Copy failed'))
-  })
-
-  panel.querySelector('#ss-preview-codepen')?.addEventListener('click', () => {
-    const currentCode = textarea.value
-    const data = JSON.stringify({
-      title: title,
-      css: type === 'css' ? currentCode : '',
-      html: type === 'tailwind'
-        ? `<div class="${currentCode.replace(/\n/g, ' ')}">StyleSnap Export</div>\n<script src="https://cdn.tailwindcss.com"></script>`
-        : '<div>StyleSnap Export</div>',
-      editors: '110',
-    })
-    const form = document.createElement('form')
-    form.method = 'POST'; form.action = 'https://codepen.io/pen/define'; form.target = '_blank'
-    form.setAttribute('data-stylesnap', 'true')
-    const input = document.createElement('input')
-    input.type = 'hidden'; input.name = 'data'; input.value = data
-    form.appendChild(input); document.body.appendChild(form)
-    form.submit(); document.body.removeChild(form)
-    showToast('Opening CodePen...')
-  })
-
-  const closePanel = () => {
-    document.removeEventListener('mousemove', onDragMove)
-    document.removeEventListener('mouseup', onDragEnd)
-    document.removeEventListener('keydown', onEsc)
-    panel.remove()
-    $$('stylesnap-export-menu')?.remove()
-  }
-  const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') closePanel() }
-
-  // ─── Drag panel by header ───
-  let dragInfo: { startX: number; startY: number; startLeft: number; startTop: number } | null = null
-  const onDragMove = (e: MouseEvent) => {
-    if (!dragInfo) return
-    const dx = e.clientX - dragInfo.startX
-    const dy = e.clientY - dragInfo.startY
-    panel.style.left = `${dragInfo.startLeft + dx}px`
-    panel.style.top = `${dragInfo.startTop + dy}px`
-  }
-  const onDragEnd = () => { dragInfo = null }
-  const headerEl = panel.querySelector('div') as HTMLElement | null
-  if (headerEl) {
-    headerEl.style.cursor = 'move'
-    headerEl.addEventListener('mousedown', (e) => {
-      const me = e as MouseEvent
-      if ((me.target as HTMLElement)?.tagName === 'BUTTON') return
-      dragInfo = { startX: me.clientX, startY: me.clientY, startLeft: panel.offsetLeft, startTop: panel.offsetTop }
-      e.preventDefault()
-    })
-  }
-  document.addEventListener('mousemove', onDragMove)
-  document.addEventListener('mouseup', onDragEnd)
-
-  panel.querySelector('#ss-preview-close')?.addEventListener('click', closePanel)
-  document.addEventListener('keydown', onEsc)
-}
-
-// ─── Preview helpers ───
-
-function extractPreviewHTML(el: HTMLElement): string {
-  const clone = el.cloneNode(true) as HTMLElement
-  clone.classList.forEach(c => { if (c.startsWith('stylesnap-') || c === LOCKED_CLASS) clone.classList.remove(c) })
-  return clone.outerHTML
-}
-
-function detectBackground(el: HTMLElement | null): string {
-  if (!el) return '#f8fafc'  // fallback
-  // Walk up from element's parent to find first non-transparent background
-  let current: HTMLElement | null = el.parentElement
-  let bgImage = ''
-  let bgColor = ''
-
-  for (let i = 0; i < 10 && current; i++) {
-    const s = window.getComputedStyle(current)
-    // Check background-image first (gradients, images take priority)
-    const bi = s.backgroundImage
-    if (bi && bi !== 'none' && !bgImage) {
-      bgImage = bi
-    }
-    // Check background-color for solid fill
-    const bc = s.backgroundColor
-    if (bc && bc !== 'rgba(0, 0, 0, 0)' && bc !== 'transparent' && !bgColor) {
-      bgColor = bc
-    }
-    // If we found both, stop
-    if (bgColor && bgImage) break
-    // If we found color and the element covers enough area, stop
-    if (bgColor) {
-      const r = current.getBoundingClientRect()
-      if (r.width > 100 && r.height > 100) break
-    }
-    current = current.parentElement
-  }
-
-  // Build CSS background value — prefer image over color, both if available
-  if (bgImage) {
-    return bgImage + (bgColor ? ` ${bgColor}` : '')
-  }
-  if (bgColor) {
-    // Determine if the background is dark or light for text contrast
-    const isDark = isDarkColor(bgColor)
-    if (isDark) {
-      // For dark backgrounds in the preview, we keep the dark bg but note it
-      return bgColor
-    }
-    return bgColor
-  }
-  return '#f8fafc'
-}
-
-// Quick check if a color is dark (for contrast hints)
-function isDarkColor(color: string): boolean {
-  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
-  if (!m) return false
-  const r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3])
-  // Perceived brightness
-  return (0.299 * r + 0.587 * g + 0.114 * b) < 128
-}
-
-function buildPreviewDoc(code: string, type: string, previewHTML?: string, _previewCSS?: string, bgOverride?: string): string {
-  // Auto-detect background from locked element's page context
-  const bg = bgOverride || detectBackground(lockedElement as HTMLElement | null)
-
-  if (type === 'component') {
-    const jsxMatch = code.match(/return\s*\(\s*([\s\S]*?)\s*\)\s*;?\s*}/)
-    const inner = jsxMatch ? jsxMatch[1] : code
-    let html = inner
-      .replace(/className=/g, 'class=')
-      .replace(/<([A-Z]\w*)/g, '<div')
-      .replace(/<\/[A-Z]\w*>/g, '</div>')
-      .replace(/\{[^}]*\}/g, '')
-      .replace(/htmlFor=/g, 'for=')
-      .replace(/onClick=/g, 'onclick=')
-      .replace(/onChange=/g, 'onchange=')
-      .trim()
-
-    return `<!DOCTYPE html><html><head>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:${bg};padding:2rem;}</style>
-</head><body>${html || '<div class="text-slate-400 text-sm">Could not extract JSX — check code editor</div>'}</body></html>`
-  }
-
-  if (type === 'css') {
-    const html = previewHTML || '<div class="target"><h2>Preview</h2><p>Sample text</p><button>Button</button></div>'
-    const safeCode = code.replace(/^\s*\{?\s*/,'').replace(/\}\s*$/,'').replace(/<\/style/gi, '<\\/style')
-    return `<!DOCTYPE html><html><head><style>body{padding:2rem;background:${bg};font-family:system-ui,sans-serif;}${safeCode}</style></head><body>${html}</body></html>`
-  }
-
-  if (type === 'tailwind') {
-    const classes = code.replace(/\n/g, ' ').trim()
-    return `<!DOCTYPE html><html><head>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:${bg};}</style>
-</head><body><div class="${classes}">Tailwind Preview</div></body></html>`
-  }
-
-  // JSON — show formatted
-  return `<!DOCTYPE html><html><head><style>body{font-family:system-ui,sans-serif;padding:2rem;background:${bg};color:#334155}pre{background:#1e293b;color:#e2e8f0;padding:16px;border-radius:8px;overflow:auto;font-size:12px;line-height:1.6}</style></head><body><h3 style="color:#6366f1;margin-bottom:12px;">JSON Data</h3><pre>${escapeHTML(code)}</pre></body></html>`
-}
-
-function escapeHTML(s: string): string {
-  const div = document.createElement('div')
-  div.textContent = s
-  return div.innerHTML
-}
-
-// ─── Feedback Modal ───────────────────────────────────────────────────────────
-
-async function showFeedbackModal() {
-  $$('ss-feedback-modal')?.remove()
-  $$('ss-feedback-backdrop')?.remove()
-
-  const lang = await detectLang()
-  const t = translations[lang] || translations.en
-
-  const modal = document.createElement('div')
-  modal.id = 'ss-feedback-modal'
-  modal.setAttribute('data-stylesnap', 'true')
-
-  modal.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <span style="font-size:13px;font-weight:600;color:#e2e8f0;">${t.feedback || 'Feedback'}</span>
-      <button id="ss-fbm-close" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;padding:0;">×</button>
-    </div>
-    <div style="display:flex;gap:4px;margin-bottom:10px;">
-      <button class="ss-fbm-type" data-type="praise" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">👍 ${t.feedbackPraise || 'Love It'}</button>
-      <button class="ss-fbm-type" data-type="bug" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">🐛 ${t.feedbackBug || 'Bug'}</button>
-      <button class="ss-fbm-type" data-type="feature" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">💡 ${t.feedbackFeature || 'Request'}</button>
-      <button class="ss-fbm-type" data-type="general" style="flex:1;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);border-radius:5px;color:#a5b4fc;cursor:pointer;font-size:10px;padding:5px 2px;">💬 ${t.feedbackGeneral || 'Other'}</button>
-    </div>
-    <textarea id="ss-fbm-msg" placeholder="${t.feedbackPlaceholder || 'Tell us what you think…'}" style="width:100%;height:80px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:11px;padding:8px;resize:none;box-sizing:border-box;font-family:system-ui,sans-serif;outline:none;display:block;"></textarea>
-    <input id="ss-fbm-email" type="email" placeholder="${t.feedbackEmailPlaceholder || 'Email (optional, for replies)'}" style="width:100%;margin-top:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:11px;padding:7px 8px;box-sizing:border-box;outline:none;display:block;">
-    <button id="ss-fbm-submit" style="margin-top:8px;width:100%;background:#6366f1;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;font-weight:600;padding:9px;transition:opacity 0.15s;">${t.feedbackSubmit || 'Send Feedback'}</button>
-    <div style="font-size:10px;color:#475569;text-align:center;margin-top:8px;">${t.feedbackContactHint || 'Need direct help?'} <a href="mailto:hi@lucidlibs.dev" style="color:#818cf8;text-decoration:none;">hi@lucidlibs.dev</a></div>
-  `
-
-  Object.assign(modal.style, {
-    position: 'fixed',
-    zIndex: '9999999',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    background: 'rgba(10, 15, 28, 0.98)',
-    border: '1px solid rgba(99, 102, 241, 0.35)',
-    borderRadius: '12px',
-    padding: '18px',
-    width: '300px',
-    maxWidth: 'calc(100vw - 32px)',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#e2e8f0',
-  })
-
-  const backdrop = document.createElement('div')
-  backdrop.id = 'ss-feedback-backdrop'
-  backdrop.setAttribute('data-stylesnap', 'true')
-  Object.assign(backdrop.style, {
-    position: 'fixed', inset: '0', zIndex: '9999998',
-    background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)',
-  })
-
-  const close = () => { modal.remove(); backdrop.remove() }
-  backdrop.addEventListener('click', close)
-  modal.querySelector('#ss-fbm-close')?.addEventListener('click', close)
-
-  let fbType = 'general'
-  modal.querySelectorAll('.ss-fbm-type').forEach(btn => {
-    btn.addEventListener('click', function(this: HTMLElement) {
-      fbType = this.dataset.type || 'general'
-      modal.querySelectorAll('.ss-fbm-type').forEach(b => {
-        ;(b as HTMLElement).style.background = 'rgba(255,255,255,0.06)'
-        ;(b as HTMLElement).style.color = '#94a3b8'
-        ;(b as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'
-      })
-      this.style.background = 'rgba(99,102,241,0.2)'
-      this.style.color = '#a5b4fc'
-      this.style.borderColor = 'rgba(99,102,241,0.3)'
-    })
-  })
-
-  modal.querySelector('#ss-fbm-submit')?.addEventListener('click', async function(this: HTMLButtonElement) {
-    const msg = (modal.querySelector('#ss-fbm-msg') as HTMLTextAreaElement)?.value?.trim()
-    if (!msg) { showToast('Write something first'); return }
-    const email = (modal.querySelector('#ss-fbm-email') as HTMLInputElement)?.value?.trim() || undefined
-    this.disabled = true; this.textContent = '…'; this.style.opacity = '0.7'
-    const result = await submitFeedback({
-      type: fbType as 'bug' | 'feature' | 'general' | 'praise',
-      message: msg,
-      email,
-      metadata: { version: chrome.runtime?.getManifest?.()?.version || 'unknown', lang },
-    })
-    if (result.ok) {
-      modal.innerHTML = `<div style="text-align:center;padding:20px 0;">
-        <div style="font-size:28px;margin-bottom:8px;">🙌</div>
-        <div style="font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:4px;">${t.feedbackThanks || 'Thank you!'}</div>
-        <div style="font-size:11px;color:#64748b;">${t.feedbackThanksDesc || 'We read every message.'}</div>
-      </div>`
-      setTimeout(close, 2200)
-    } else {
-      this.disabled = false; this.style.opacity = ''
-      this.textContent = t.feedbackSubmit || 'Send Feedback'
-      showToast(result.error || t.feedbackError || 'Failed to send')
-    }
-  })
-
-  stAppend(backdrop)
-  stAppend(modal)
-  setTimeout(() => (modal.querySelector('#ss-fbm-msg') as HTMLTextAreaElement)?.focus(), 50)
-}
-
-// ─── Upgrade Modal ────────────────────────────────────────────────────────────
-
-async function showUpgradeModal(trigger?: string) {
-  $$('ss-upgrade-modal')?.remove()
-  $$('ss-upgrade-backdrop')?.remove()
-
-  const lang = await detectLang()
-  const t = translations[lang] || translations.en
-
-  const modal = document.createElement('div')
-  modal.id = 'ss-upgrade-modal'
-  modal.setAttribute('data-stylesnap', 'true')
-
-  const features = [
-    { icon: '∞', label: t.featUnlimited || 'Unlimited extractions', desc: t.featUnlimitedDesc || 'No daily limits' },
-    { icon: '🎨', label: t.featTailwind || 'Tailwind class export', desc: t.featTailwindDesc || '300+ mapping rules' },
-    { icon: '⚛️', label: t.featReactVue || 'React / Vue code gen', desc: t.featReactVueDesc || 'Ready-to-paste components' },
-    { icon: '🪙', label: t.featTokens || 'Design token export', desc: t.featTokensDesc || 'Full color & spacing system' },
-    { icon: '🤖', label: t.featAIFallback || 'AI code fallback', desc: t.featAIFallbackDesc || 'For complex patterns' },
-    { icon: '♾️', label: t.featUpdates || 'Lifetime updates', desc: t.featUpdatesDesc || 'Pay once, own forever' },
-  ]
-
-  const quotaText = ((t as Record<string, string>).quotaReached || "You've used all {limit} free extractions today. Upgrade for unlimited access.").replace('{limit}', String(DAILY_FREE_LIMIT))
-  const quotaBanner = trigger === 'quota'
-    ? `<div style="background:rgba(251,146,60,0.1);border:1px solid rgba(251,146,60,0.3);border-radius:6px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#fbbf24;text-align:center;">
-        ⚠️ ${quotaText}
-      </div>`
-    : ''
-
-  modal.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div>
-        <div style="font-size:15px;font-weight:700;color:#e2e8f0;">${t.upgradeModalTitle || 'StyleSnap Pro'}</div>
-        <div style="font-size:10px;color:#64748b;margin-top:1px;">${t.oneTime || 'One-time payment · Lifetime access'}</div>
-      </div>
-      <button id="ss-upgrade-close" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;padding:0;flex-shrink:0;">×</button>
-    </div>
-    ${quotaBanner}
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
-      ${features.map(f => `
-        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px;">
-          <div style="font-size:13px;margin-bottom:2px;">${f.icon} <span style="font-size:11px;font-weight:600;color:#e2e8f0;">${f.label}</span></div>
-          <div style="font-size:9px;color:#64748b;line-height:1.4;">${f.desc}</div>
-        </div>
-      `).join('')}
-    </div>
-    <div style="background:linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.1));border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:12px;text-align:center;margin-bottom:10px;">
-      <div style="font-size:22px;font-weight:700;color:#e2e8f0;">$29</div>
-      <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${t.oneTime || 'One-time · No subscription · Lifetime access'}</div>
-    </div>
-    <button id="ss-upgrade-cta" style="width:100%;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:7px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;padding:11px;transition:opacity 0.15s;margin-bottom:8px;">${t.upgradeToPro || 'Upgrade to Pro — $29'}</button>
-    <div style="display:flex;align-items:center;gap:4px;margin-bottom:10px;">
-      <input id="ss-upgrade-key" type="text" placeholder="${t.licenseKeyLabel || 'License Key'} (PRO-XXXX-…)" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:5px;color:#e2e8f0;font-size:11px;padding:7px 8px;outline:none;box-sizing:border-box;">
-      <button id="ss-upgrade-activate" style="background:#1e293b;border:1px solid rgba(99,102,241,0.4);border-radius:5px;color:#818cf8;cursor:pointer;font-size:11px;font-weight:600;padding:7px 10px;white-space:nowrap;">${t.activate || 'Activate'}</button>
-    </div>
-    <div style="text-align:center;font-size:10px;color:#475569;">
-      <span>${t.secure || '🔒 Secure'}</span> · <span>${t.instant || '📧 Instant'}</span> · <span>${t.lifetime || '♾️ Lifetime'}</span>
-    </div>
-  `
-
-  Object.assign(modal.style, {
-    position: 'fixed',
-    zIndex: '9999999',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    background: 'rgba(10, 15, 28, 0.98)',
-    border: '1px solid rgba(99, 102, 241, 0.35)',
-    borderRadius: '12px',
-    padding: '18px',
-    width: '340px',
-    maxWidth: 'calc(100vw - 32px)',
-    maxHeight: '90vh',
-    overflowY: 'auto',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#e2e8f0',
-  })
-
-  // Backdrop
-  const backdrop = document.createElement('div')
-  backdrop.id = 'ss-upgrade-backdrop'
-  backdrop.setAttribute('data-stylesnap', 'true')
-  Object.assign(backdrop.style, {
-    position: 'fixed', inset: '0', zIndex: '9999998',
-    background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)',
-  })
-
-  const close = () => { modal.remove(); backdrop.remove() }
-  backdrop.addEventListener('click', close)
-  modal.querySelector('#ss-upgrade-close')?.addEventListener('click', close)
-
-  modal.querySelector('#ss-upgrade-cta')?.addEventListener('click', async function(this: HTMLButtonElement) {
-    const btn = this
-    btn.disabled = true; btn.textContent = 'Opening…'; btn.style.opacity = '0.7'
-    try {
-      const url = await createCheckout()
-      window.open(url, '_blank')
-      setTimeout(() => {
-        btn.disabled = false; btn.style.opacity = ''
-        btn.textContent = t.upgradeToPro || 'Upgrade to Pro — $29'
-        const keyInput = modal.querySelector('#ss-upgrade-key') as HTMLInputElement | null
-        if (keyInput) { keyInput.placeholder = 'Paste license key from email'; keyInput.focus() }
-      }, 2000)
-    } catch {
-      btn.disabled = false; btn.style.opacity = ''
-      btn.textContent = t.upgradeToPro || 'Upgrade to Pro — $29'
-      showToast(t.checkoutError || 'Checkout unavailable — try again')
-    }
-  })
-
-  modal.querySelector('#ss-upgrade-activate')?.addEventListener('click', async function(this: HTMLButtonElement) {
-    const keyInput = modal.querySelector('#ss-upgrade-key') as HTMLInputElement
-    const key = keyInput?.value?.trim()
-    if (!key) { showToast('Enter a license key'); return }
-    this.disabled = true; this.textContent = '…'
-    const result = await activateLicenseKey(key)
-    if (result.success) {
-      showToast(t.activateSuccess || 'License activated! 🎉')
-      close()
-    } else {
-      this.disabled = false; this.textContent = t.activate || 'Activate'
-      showToast(result.error || t.activateFail || 'Activation failed')
-    }
-  })
-
-  stAppend(backdrop)
-  stAppend(modal)
-}
-
-async function showSettingsPopup() {
-  const existing = $$('stylesnap-settings-popup')
-  if (existing) { existing.remove(); return }
-  closeHintPopups('stylesnap-settings-popup')
-
-  // Floating popup (not bottom sheet)
-  const popup = document.createElement('div')
-  popup.id = 'stylesnap-settings-popup'
-  popup.setAttribute('data-stylesnap', 'true')
-  Object.assign(popup.style, {
-    position: 'fixed',
-    zIndex: '999994',
-    background: 'rgba(15, 23, 42, 0.97)',
-    border: '1px solid rgba(99, 102, 241, 0.3)',
-    borderRadius: '10px',
-    padding: '14px',
-    minWidth: '280px',
-    maxWidth: '300px',
-    maxHeight: '80vh',
-    overflow: 'hidden auto',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#e2e8f0',
-    fontSize: '12px',
-  })
-
-  // Position: prefer below hint bar if visible, else near floating button
-  const hint = $$('stylesnap-hint-bar')
-  if (hint && window.getComputedStyle(hint).opacity !== '0') {
-    const hRect = hint.getBoundingClientRect()
-    popup.style.top = `${hRect.bottom + 6}px`
-    popup.style.left = '50%'
-    popup.style.transform = 'translateX(-50%)'
-    popup.style.right = 'auto'
-  } else {
-    const fb = $$(FLOATING_BTN_ID)
-    if (fb) {
-      const fbRect = fb.getBoundingClientRect()
-      popup.style.right = `${window.innerWidth - fbRect.left + 8}px`
-      popup.style.top = `${fbRect.top - 8}px`
-      popup.style.transform = 'translateY(-100%)'
-    } else {
-      popup.style.bottom = '100px'
-      popup.style.right = '24px'
-      popup.style.transform = 'none'
-    }
-  }
-
-  // Close function
-  const close = () => {
-    popup.remove()
-  }
-
-  // Load license + settings + AI config
-  const [licenseStatus, settingsData] = await Promise.all([
-    getLicenseStatus(),
-    new Promise<Record<string, unknown>>(res => chrome.storage.local.get(['stylesnap_settings'], r => res(r.stylesnap_settings || {}))),
-  ])
-  _licenseIsPro = licenseStatus.isPro
-
-  const settings = { ...DEFAULT_SETTINGS, ...settingsData } as UserSettings
-  const lang = await detectLang()
-  const t = translations[lang] || translations.en
-
-
-  const inputStyle = 'background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:5px 8px;color:#e2e8f0;font-size:11px;width:100%;box-sizing:border-box;'
-  const btnStyle = 'background:#6366f1;border:none;border-radius:4px;padding:5px 10px;color:#fff;font-size:11px;cursor:pointer;white-space:nowrap;'
-  const secondaryBtnStyle = 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);border-radius:4px;padding:5px 10px;color:#e2e8f0;font-size:11px;cursor:pointer;white-space:nowrap;'
-  const sectionStyle = 'margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);'
-
-  // License status text
-  const proBadge = licenseStatus.isPro
-    ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;">PRO</span>'
-    : '<span style="background:rgba(148,163,184,0.1);color:#94a3b8;border:1px solid rgba(148,163,184,0.2);border-radius:3px;padding:1px 6px;font-size:10px;">Free</span>'
-  const usageText = licenseStatus.isPro
-    ? 'Unlimited'
-    : `${licenseStatus.dailyUsed}/${licenseStatus.dailyLimit} today`
-  const licenseInfo = licenseStatus.isPro
-    ? `<div style="font-size:10px;color:#64748b;margin-top:3px;">${licenseStatus.email || ''} ${licenseStatus.instanceId ? '· ' + licenseStatus.instanceId.slice(0, 8) + '...' : ''}</div>`
-    : ''
-
-  // SVG icon helpers (all Lucide line style, 14×14, stroke 1.75)
-  const svg14i = `${SVG} width="14" height="14" style="flex:none;vertical-align:middle;margin-right:4px;"`
-  const iconKey     = `<svg ${svg14i}><path d="M21 2 19 4M11.4 14.6a5 5 0 1 0-6.8-6.8 5 5 0 0 0 6.8 6.8Z"/><circle cx="8" cy="8" r="1.5"/><path d="m21 2-2.6 2.6"/></svg>`
-  const iconSlider  = `<svg ${svg14i}><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></svg>`
-  const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.04);border-radius:6px;padding:2px;margin-left:auto;'
-  const chipStyle = 'background:transparent;border:none;color:#94a3b8;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;transition:all 0.12s;'
-  const chipActiveStyle = 'background:rgba(99,102,241,0.2);color:#e2e8f0;'
-
-  // Reusable chip group helper
-  const chipGroup = (idBase: string, options: {value: string; label: string}[], selected: string) => {
-    return `<div id="${idBase}" style="${chipGroupStyle}">${
-      options.map(o => {
-        const isActive = o.value === selected
-        return `<button data-value="${o.value}" style="${chipStyle}${isActive ? chipActiveStyle : ''}" class="${isActive ? 'active-chip' : ''}" type="button">${o.label}</button>`
-      }).join('')
-    }</div>`
-  }
-  const toggleHtml = (id: string, checked: boolean) =>
-    `<label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:3px 0;">
-      <span style="font-size:11px;color:#cbd5e1;flex:1;margin-right:8px;"><span id="ss-label-${id}"></span></span>
-      <div style="position:relative;width:36px;height:20px;flex:none;">
-        <input id="${id}" type="checkbox" ${checked ? 'checked' : ''}
-          style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;z-index:1;margin:0;">
-        <div style="width:36px;height:20px;border-radius:10px;background:${checked ? '#6366f1' : 'rgba(255,255,255,0.12)'};transition:background 0.15s;display:flex;align-items:center;padding:2px;">
-          <div style="width:16px;height:16px;border-radius:50%;background:#fff;transform:translateX(${checked ? '16px' : '0'});transition:transform 0.15s;box-shadow:0 1px 2px rgba(0,0,0,0.2);"></div>
-        </div>
-      </div>
-    </label>`
-
-  // Mail icon for feedback button
-  const iconMail = `<svg ${svg14i}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`
-
-  popup.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <span style="display:flex;align-items:center;font-weight:600;font-size:13px;">${iconSlider} Settings</span>
-      <div style="display:flex;align-items:center;gap:2px;">
-        <button id="ss-btn-feedback" title="Feedback" style="background:none;border:none;color:#818cf8;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;transition:color 0.15s;">${iconMail}</button>
-        <button id="ss-settings-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
-      </div>
-    </div>
-
-    <!-- License -->
-    <div style="font-size:11px;line-height:1.5;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-        <span style="display:flex;align-items:center;font-weight:600;color:#e2e8f0;">${iconKey} ${t.license}</span>
-        ${proBadge}
-      </div>
-      <div style="font-size:10px;color:#94a3b8;margin-bottom:6px;">${usageText}</div>
-      ${licenseInfo}
-      ${!licenseStatus.isPro ? `
-        <div style="margin-top:6px;display:flex;gap:6px;">
-          <input id="ss-license-key" type="text" placeholder="${t.licenseKeyLabel}" style="${inputStyle}flex:1;">
-          <button id="ss-license-activate" style="${btnStyle}">${t.activate || 'Activate'}</button>
-        </div>
-        <button id="ss-license-buy" style="margin-top:6px;${btnStyle}width:100%;">${t.upgrade || 'Upgrade to Pro — $29'}</button>
-        <div style="font-size:10px;color:#64748b;margin-top:4px;text-align:center;">
-          <a id="ss-license-recover" href="#" style="color:#818cf8;text-decoration:none;cursor:pointer;">Lost your license key? Recover</a>
-        </div>
-      ` : `
-        <button id="ss-license-deactivate" style="margin-top:6px;${secondaryBtnStyle}width:100%;">${t.deactivate || 'Deactivate License'}</button>
-      `}
-    </div>
-
-    <!-- Preferences -->
-    <div style="${sectionStyle}">
-      <span style="font-weight:600;font-size:11px;color:#e2e8f0;margin-bottom:4px;">${iconSlider} ${t.preferences || 'Preferences'}</span>
-      ${toggleHtml('ss-pref-floating-btn', settings.showFloatingBtn !== false)}
-      <div id="ss-floating-btn-hint" style="font-size:9px;color:#64748b;margin-top:-2px;margin-bottom:4px;margin-left:2px;${settings.showFloatingBtn !== false ? 'display:none;' : ''}">
-        💡 Click the StyleSnap toolbar icon to reopen settings
-      </div>
-      ${toggleHtml('ss-pref-show-tw', settings.showTailwindOverlay !== false)}
-      ${toggleHtml('ss-pref-side-panel', settings.showSidePanel !== false)}
-      <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-        <span style="font-size:11px;color:#cbd5e1;white-space:nowrap;">Overlay:</span>
-        ${chipGroup('ss-pref-overlay-side', [
-          {value: 'right', label: 'Right'},
-          {value: 'left', label: 'Left'},
-        ], (settings.overlaySide || 'right'))}
-      </div>
-      <div style="margin-top:6px;font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:8px;">
-        <span style="white-space:nowrap;">${t.assistMode || 'Assist'}:</span>
-        ${chipGroup('ss-pref-assist-mode', [
-          {value: '0', label: 'Off'},
-          {value: '1', label: 'Guidelines'},
-          {value: '2', label: 'Grid'},
-        ], String(settings.assistMode ?? 1))}
-      </div>
-      <div style="margin-top:6px;font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:8px;">
-        <span style="white-space:nowrap;">Color:</span>
-        ${chipGroup('ss-pref-color-format', [
-          {value: 'rgb', label: 'RGB'},
-          {value: 'hex', label: 'Hex'},
-          {value: 'hsl', label: 'HSL'},
-        ], (settings.colorFormat || 'rgb'))}
-      </div>
-    </div>
-
-    <div style="font-size:10px;color:#475569;text-align:center;padding-top:10px;">
-      StyleSnap v1.0.0 · by LucidLibs<br>
-      <kbd>G</kbd> cycle mode &nbsp; <kbd>Esc</kbd> exit
-    </div>
-  `
-  stAppend(popup)
-
-  // Set i18n labels for toggles
-  const setLabel = (id: string, key: string) => {
-    const el = popup.querySelector(`#ss-label-${id}`)
-    if (el) el.textContent = (t as Record<string, string>)[key] || key
-  }
-  setLabel('ss-pref-floating-btn', 'floatingBtn')
-  setLabel('ss-pref-show-tw', 'showTailwindOverlay')
-  const spLabel = popup.querySelector('#ss-label-ss-pref-side-panel')
-  if (spLabel) spLabel.textContent = (t as Record<string, string>).showSidePanel || 'Inspector panel (box model + preview)'
-  // ─── Event handlers ────────────────────────────────────────────────
-
-  const savePrefs = () => {
-    const fbChecked = (popup.querySelector('#ss-pref-floating-btn') as HTMLInputElement)?.checked
-    const twChecked = (popup.querySelector('#ss-pref-show-tw') as HTMLInputElement)?.checked
-    const spChecked = (popup.querySelector('#ss-pref-side-panel') as HTMLInputElement)?.checked
-    const os = (popup.querySelector('#ss-pref-overlay-side .active-chip') as HTMLElement)?.dataset.value as 'right' | 'left' || 'right'
-    const am = parseInt((popup.querySelector('#ss-pref-assist-mode .active-chip') as HTMLElement)?.dataset.value || '1', 10)
-    const cform = (popup.querySelector('#ss-pref-color-format .active-chip') as HTMLElement)?.dataset.value as 'rgb' | 'hex' | 'hsl' || 'rgb'
-    const newSettings: Partial<UserSettings> = {
-      showFloatingBtn: fbChecked,
-      showTailwindOverlay: twChecked,
-      showSidePanel: spChecked,
-      overlaySide: os,
-      assistMode: am as 0 | 1 | 2,
-      colorFormat: cform,
-    }
-    _showSidePanel = spChecked !== false
-    chrome.storage.local.get(['stylesnap_settings'], (res) => {
-      const cur = res.stylesnap_settings || {}
-      chrome.storage.local.set({ stylesnap_settings: { ...cur, ...newSettings } })
-    })
-  }
-
-  // Toggle switches
-  popup.querySelector('#ss-pref-floating-btn')?.addEventListener('change', () => {
-    savePrefs()
-    // Show/hide the "toolbar icon" hint
-    const fbChecked = (popup.querySelector('#ss-pref-floating-btn') as HTMLInputElement)?.checked
-    const hint = popup.querySelector('#ss-floating-btn-hint') as HTMLElement | null
-    if (hint) hint.style.display = fbChecked ? 'none' : 'block'
-  })
-  popup.querySelector('#ss-pref-side-panel')?.addEventListener('change', () => {
-    savePrefs()
-    if (!_showSidePanel) hideSidePanel()
-    else if (lockedElement) { const ov = $$(OVERLAY_ID); if (ov) updateSidePanel(lockedElement as HTMLElement, _lastParsedCSS, ov) }
-  })
-  popup.querySelector('#ss-pref-show-tw')?.addEventListener('change', savePrefs)
-
-  // Chip group click handlers — replaces old select change listeners
-  const bindChipGroup = (groupId: string) => {
-    const group = popup.querySelector(`#${groupId}`)
-    if (!group) return
-    group.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest('button')
-      if (!btn) return
-      // Remove active from all, add to clicked
-      group.querySelectorAll('button').forEach(b => {
-        b.classList.remove('active-chip')
-        ;(b as HTMLElement).style.cssText = chipStyle
-      })
-      btn.classList.add('active-chip')
-      btn.style.cssText = chipStyle + chipActiveStyle
-      savePrefs()
-    })
-  }
-  bindChipGroup('ss-pref-overlay-side')
-  bindChipGroup('ss-pref-assist-mode')
-  bindChipGroup('ss-pref-color-format')
-  // Close
-  popup.querySelector('#ss-settings-close')?.addEventListener('click', close)
-
-  // Click outside to close — leak-proof, auto-cleans on any removal path
-  attachOutsideClose(popup, { delay: 200 })
-
-  // License Activate
-  popup.querySelector('#ss-license-activate')?.addEventListener('click', async () => {
-    const keyInput = popup.querySelector('#ss-license-key') as HTMLInputElement
-    const key = keyInput?.value?.trim()
-    if (!key) { showToast('Enter a license key'); return }
-    showToast('Activating...')
-    const result = await activateLicenseKey(key)
-    if (result.success) {
-      showToast('License activated! 🎉')
-      popup.remove()
-      // Re-open to show new state
-      setTimeout(() => showSettingsPopup(), 400)
-    } else {
-      showToast(result.error || 'Activation failed')
-    }
-  })
-
-  // License Buy
-  popup.querySelector('#ss-license-buy')?.addEventListener('click', async function(this: HTMLButtonElement) {
-    const btn = this
-    const original = btn.textContent
-    btn.disabled = true
-    btn.textContent = 'Opening…'
-    btn.style.opacity = '0.7'
-    try {
-      const url = await createCheckout()
-      window.open(url, '_blank')
-      // After redirect, prompt to activate
-      setTimeout(() => {
-        btn.disabled = false
-        btn.textContent = original
-        btn.style.opacity = ''
-        const keyInput = popup.querySelector('#ss-license-key') as HTMLInputElement | null
-        if (keyInput) {
-          keyInput.placeholder = 'Paste license key from email'
-          keyInput.focus()
-          showToast('Purchase complete? Paste your license key above.')
-        }
-      }, 2000)
-    } catch {
-      btn.disabled = false
-      btn.textContent = original
-      btn.style.opacity = ''
-      showToast('Checkout unavailable — try again later')
-    }
-  })
-
-  // License Deactivate
-  popup.querySelector('#ss-license-deactivate')?.addEventListener('click', async () => {
-    showToast('Deactivating...')
-    await deactivateLicenseInstance()
-    showToast('License deactivated')
-    popup.remove()
-    setTimeout(() => showSettingsPopup(), 400)
-  })
-
-  // License Recover — opens recovery page on website
-  popup.querySelector('#ss-license-recover')?.addEventListener('click', (e) => {
-    e.preventDefault()
-    window.open('https://style.lucidlibs.dev/recover', '_blank')
-  })
-
-  // Update toggle visual on click (sync slider position)
-  popup.querySelectorAll('input[type=checkbox]').forEach(cb => {
-    cb.addEventListener('change', function(this: HTMLInputElement) {
-      const slider = this.nextElementSibling?.querySelector('div:last-child') as HTMLElement | null
-      if (slider) slider.style.transform = `translateX(${this.checked ? '16px' : '0'})`
-      // Update background
-      const track = this.nextElementSibling as HTMLElement | null
-      if (track) track.style.background = this.checked ? '#6366f1' : 'rgba(255,255,255,0.12)'
-    })
-  })
-
-  // Feedback button → open independent modal
-  popup.querySelector('#ss-btn-feedback')?.addEventListener('click', () => {
-    showFeedbackModal()
-  })
-}
 
 function onScroll() {
   if (!isActive()) return
-  const target = lockedElement || lastHighlighted
+  const target = S.lockedElement || S.lastHighlighted
   if (target) updateGuides(target.getBoundingClientRect())
 }
 
@@ -3913,9 +1994,9 @@ async function initFloatingButton() {
 
     // restore settings
     if (s.lastUsedMode !== undefined && s.lastUsedMode !== 0) {
-      lastMode = s.lastUsedMode as number
+      S.lastMode = s.lastUsedMode as number
     }
-    inspectMode = 0  // always start inactive; user must click to activate
+    S.inspectMode = 0  // always start inactive; user must click to activate
 
     injectFloatingBtnStyles()
 
@@ -4025,7 +2106,7 @@ async function initFloatingButton() {
 
       if (!isActive()) {
         // Enter inspect mode (default: Inspect = 1)
-        setInspectMode(lastMode > 0 ? lastMode : 1)
+        setInspectMode(S.lastMode > 0 ? S.lastMode : 1)
       } else {
         // Exit inspect mode
         setInspectMode(0)
@@ -4034,7 +2115,7 @@ async function initFloatingButton() {
 
     stAppend(btn)
 
-    // sync initial mode UI (inspectMode is always 0 on load; just render badge)
+    // sync initial mode UI (S.inspectMode is always 0 on load; just render badge)
     updateModeUI()
 
     // ─── First-install onboarding bubble ────────────────────────────
@@ -4137,7 +2218,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown }, _sender, sendResponse) => {
   switch (message.type) {
     case 'INIT_INSPECTOR':
-      if (inspectMode === 0) setInspectMode(1)
+      if (S.inspectMode === 0) setInspectMode(1)
       sendResponse({ ok: true })
       break
 
@@ -4185,7 +2266,7 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
 
     case 'TOGGLE_INSPECT': {
       if (!isActive()) {
-        setInspectMode(lastMode > 0 ? lastMode : 1)
+        setInspectMode(S.lastMode > 0 ? S.lastMode : 1)
       } else {
         setInspectMode(0)
       }
@@ -4223,7 +2304,7 @@ if (import.meta.env.DEV) {
   return 'overlay shown for ' + targetSelector
 }
 
-;(window as any).debugInspectMode = () => inspectMode
+;(window as any).debugInspectMode = () => S.inspectMode
 
 // ─── Cross-world debug bridge (MAIN world → ISOLATED world) ───
 // MAIN world JS can dispatch these events to call internal functions.
@@ -4243,25 +2324,25 @@ document.addEventListener('stylesnap-debug-lock', ((e: CustomEvent) => {
 }) as EventListener)
 
 document.addEventListener('stylesnap-debug-toggle-compare', (() => {
-  compareMode = !compareMode
+  S.compareMode = !S.compareMode
   const btn = document.getElementById('stylesnap-action-compare') as HTMLElement | null
   if (btn) {
-    if (compareMode) { btn.classList.add('active'); btn.title = 'Compare: ON' }
+    if (S.compareMode) { btn.classList.add('active'); btn.title = 'Compare: ON' }
     else { btn.classList.remove('active'); btn.title = 'Compare: OFF' }
   }
-  if (!compareMode) { removeCompareHighlight(); hideCompareTooltip() }
+  if (!S.compareMode) { removeCompareHighlight(); hideCompareTooltip() }
 }) as EventListener)
 
 document.addEventListener('stylesnap-debug-compare-state', ((e: CustomEvent) => {
   const cb = e.detail?.callback as ((d: unknown) => void) | undefined
-  if (cb) cb({ compareMode, lockedElement: !!lockedElement, compareTarget: !!_compareTarget })
+  if (cb) cb({ compareMode: S.compareMode, lockedElement: !!S.lockedElement, compareTarget: !!_compareTarget })
 }) as EventListener)
 
 document.addEventListener('stylesnap-debug-compare', ((e: CustomEvent) => {
   const selector = e.detail?.selector as string | undefined
   if (!selector) return
   const el = document.querySelector(selector)
-  if (el && compareMode && lockedElement) {
+  if (el && S.compareMode && S.lockedElement) {
     highlightCompareElement(el)
     const rect = el.getBoundingClientRect()
     showCompareTooltip(el, rect.left + rect.width / 2, rect.top)
@@ -4274,8 +2355,8 @@ document.addEventListener('stylesnap-debug-unlock', (() => {
 
 // Debug: trigger preview panel for export
 document.addEventListener('stylesnap-debug-preview-css', (() => {
-  if (!lockedElement) { showToast('Lock an element first'); return }
-  const el = lockedElement as HTMLElement
+  if (!S.lockedElement) { showToast('Lock an element first'); return }
+  const el = S.lockedElement as HTMLElement
   el.classList.remove(LOCKED_CLASS)
   const styles = window.getComputedStyle(el)
   el.classList.add(LOCKED_CLASS)
@@ -4302,8 +2383,8 @@ document.addEventListener('stylesnap-debug-preview-css', (() => {
 
 // Debug: trigger preview panel for Tailwind
 document.addEventListener('stylesnap-debug-preview-tw', (() => {
-  if (!lockedElement) { showToast('Lock an element first'); return }
-  const el = lockedElement as HTMLElement
+  if (!S.lockedElement) { showToast('Lock an element first'); return }
+  const el = S.lockedElement as HTMLElement
   el.classList.remove(LOCKED_CLASS)
   const styles = window.getComputedStyle(el)
   el.classList.add(LOCKED_CLASS)
@@ -4321,8 +2402,8 @@ document.addEventListener('stylesnap-debug-preview-tw', (() => {
 
 // Debug: trigger preview panel for component (simulate AI generation)
 document.addEventListener('stylesnap-debug-preview-component', (() => {
-  if (!lockedElement) { showToast('Lock an element first'); return }
-  const el = lockedElement as HTMLElement
+  if (!S.lockedElement) { showToast('Lock an element first'); return }
+  const el = S.lockedElement as HTMLElement
   const previewHTML = extractPreviewHTML(el)
   showPreviewPanel({
     code: `export default function UpgradeButton() {\n  return (\n    <button className="bg-indigo-500 hover:bg-indigo-400 text-white font-semibold py-2.5 px-5 rounded-lg transition-all duration-200 hover:-translate-y-px hover:shadow-lg hover:shadow-indigo-500/40 text-sm cursor-pointer border-none">\n      Upgrade Now\n    </button>\n  )\n}`,
@@ -4334,8 +2415,8 @@ document.addEventListener('stylesnap-debug-preview-component', (() => {
 
 // Debug: trigger preview panel for JSON
 document.addEventListener('stylesnap-debug-preview-json', (() => {
-  if (!lockedElement) { showToast('Lock an element first'); return }
-  const el = lockedElement as HTMLElement
+  if (!S.lockedElement) { showToast('Lock an element first'); return }
+  const el = S.lockedElement as HTMLElement
   el.classList.remove(LOCKED_CLASS)
   const styles = window.getComputedStyle(el)
   el.classList.add(LOCKED_CLASS)
