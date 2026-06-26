@@ -8,21 +8,23 @@ import './overlay.css'
 
 import { parseElement, extractComponentHTML, extractComponentCSS, formatCSS } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
-import { detectLang, translations, TranslationKey } from '@/lib/i18n-core'
+import { translations, TranslationKey } from '@/lib/i18n-core'
 import {
-  stAppend, $$, attachOutsideClose,
+  stAppend, $$,
   isColorValue, escapeHtml, classNameOf, colorBlock,
-  SVG, CLOSE_X, showToast, closeHintPopups,
+  SVG, showToast,
 } from './ui'
 import { mapCSSToTailwind, getTailwindClasses } from './tailwind'
+import { matchesAnyNode, parseRulePropsRaw, extractPseudoFromSelector } from './css-rules'
 import { S, isActive, assistMode, OVERLAY_ID, HIGHLIGHT_CLASS, LOCKED_CLASS, PREVIEW_CLASS, FLOATING_BTN_ID } from './state'
 import { showUpgradeModal } from './panels/modals'
 import { showAIPrompt } from './panels/ai-prompt'
-import { showDesignPopup } from './panels/design'
 import { toggleShortcutsPanel } from './panels/shortcuts'
 import { showPreviewPanel, extractPreviewHTML } from './panels/preview-dev'
 import { updateSidePanel, hideSidePanel } from './side-panel'
 import { showSettingsPopup } from './panels/settings'
+import { initFloatingButton } from './floating-button'
+import { showHintBar, hideHintBar } from './hint-bar'
 
 import { getLicenseStatus } from '@/lib/license'
 import type { ParsedCSS } from '@/shared/types'
@@ -140,7 +142,7 @@ const MODE_ICON_SVG = [
 
 const MODE_BADGE_COLOR = ['#5F5E5A', '#534AB7', '#0F6E56', '#185FA5'] as const
 
-function updateModeUI() {
+export function updateModeUI() {
   document.body.classList.remove('stylesnap-mode-guidelines', 'stylesnap-mode-grid')
   if (S.inspectMode === 2) document.body.classList.add('stylesnap-mode-guidelines')
   else if (S.inspectMode === 3) document.body.classList.add('stylesnap-mode-grid')
@@ -181,7 +183,7 @@ function applyInspectorListeners(add: boolean) {
   if (!add && _mmRaf) { cancelAnimationFrame(_mmRaf); _mmRaf = 0; _mmEvent = null }
 }
 
-function setInspectMode(newMode: number) {
+export function setInspectMode(newMode: number) {
   const wasActive = isActive()
   S.inspectMode = newMode
   const nowActive = isActive()
@@ -342,7 +344,7 @@ function getOrCreateOverlay(): HTMLElement {
   return overlay
 }
 
-function showOverlay(el: Element, parsedCSS: ParsedCSS) {
+export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const overlay = getOrCreateOverlay()
   const rect = el.getBoundingClientRect()
 
@@ -757,7 +759,7 @@ function removeHighlight() {
   }
 }
 
-function lockElement(el: Element) {
+export function lockElement(el: Element) {
   if (S.lockedElement) S.lockedElement.classList.remove(LOCKED_CLASS)
   // Clean up highlight/preview classes before adding lock
   el.classList.remove(HIGHLIGHT_CLASS, PREVIEW_CLASS)
@@ -786,7 +788,7 @@ function lockElement(el: Element) {
   }
 }
 
-function unlockElement() {
+export function unlockElement() {
   if (S.lockedElement) {
     S.lockedElement.classList.remove(LOCKED_CLASS)
     S.lockedElement = null
@@ -1300,226 +1302,6 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-// ─── Hint Bar ──────────────────────────────────────────────────────────
-
-function showHintBar() {
-  hideHintBar()
-  const bar = document.createElement('div')
-  bar.id = 'stylesnap-hint-bar'
-  bar.setAttribute('data-stylesnap', 'true')
-  bar.innerHTML = `
-    <style>
-      .ss-hint-logo { font-weight:700; color:#818cf8; margin-right:4px; font-size:12px; }
-      .ss-hint-item { color:#cbd5e1; }
-      .ss-hint-item kbd { display:inline-block; background:rgba(255,255,255,0.1); color:#e2e8f0; padding:1px 5px; border-radius:3px; font-size:10px; font-family:monospace; margin-right:2px; border:1px solid rgba(255,255,255,0.08); }
-      .ss-hint-sep { color:rgba(255,255,255,0.12); }
-      .ss-hint-close { background:none; border:none; color:rgba(255,255,255,0.25); cursor:pointer; font-size:14px; padding:0 2px; margin-left:4px; line-height:1; transition:color 0.15s; }
-      .ss-hint-close:hover { color:rgba(255,255,255,0.6); }
-      .ss-hint-settings { background:none; border:none; color:rgba(255,255,255,0.45); cursor:pointer; font-size:13px; padding:0 2px; margin-left:4px; line-height:1; transition:color 0.15s; display:flex; align-items:center; }
-      .ss-hint-settings:hover { color:rgba(255,255,255,0.85); }
-      .ss-hint-settings svg { width:13px; height:13px; }
-      .ss-hint-action { background:none; border:1px solid rgba(255,255,255,0.12); border-radius:3px; color:rgba(255,255,255,0.5); cursor:pointer; font-size:10px; padding:2px 6px; margin-left:6px; transition:all 0.15s; white-space:nowrap; }
-      .ss-hint-action:hover { border-color:rgba(99,102,241,0.4); color:#a5b4fc; background:rgba(99,102,241,0.1); }
-    </style>
-    <span class="ss-hint-logo">StyleSnap</span>
-    <span class="ss-hint-item"><kbd>↑↓←→</kbd> DOM</span>
-    <span class="ss-hint-sep">·</span>
-    <span class="ss-hint-item"><kbd>G</kbd> Assist</span>
-    <span class="ss-hint-sep">·</span>
-    <span class="ss-hint-item"><kbd>Space</kbd> Compare</span>
-    <span class="ss-hint-sep">·</span>
-    <span class="ss-hint-item"><kbd>ESC</kbd> Exit</span>
-    <span class="ss-hint-sep">·</span>
-    <span class="ss-hint-item"><kbd>?</kbd> All</span>
-    <button class="ss-hint-action ss-hint-design" title="Colors & Fonts">Design</button>
-    <button class="ss-hint-action ss-hint-history" title="Inspection history">History</button>
-    <button class="ss-hint-settings" title="Settings"><svg ${SVG}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
-    <button class="ss-hint-close" title="Dismiss">&times;</button>
-  `
-  Object.assign(bar.style, {
-    position: 'fixed',
-    top: '0',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '5px 14px',
-    background: 'rgba(15, 23, 42, 0.92)',
-    border: '1px solid rgba(99, 102, 241, 0.25)',
-    borderTop: 'none',
-    borderRadius: '0 0 10px 10px',
-    fontFamily: 'system-ui, sans-serif',
-    fontSize: '11px',
-    color: '#94a3b8',
-    zIndex: '9999992',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-    transition: 'opacity 0.3s ease, transform 0.3s ease',
-    opacity: '0',
-    pointerEvents: 'auto',
-    whiteSpace: 'nowrap',
-    backdropFilter: 'blur(8px)',
-  })
-
-  stAppend(bar)
-
-  const closeBtn = bar.querySelector('.ss-hint-close')!
-  closeBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    hideHintBar()
-  })
-
-  const settingsBtn = bar.querySelector('.ss-hint-settings')!
-  settingsBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    showSettingsPopup()
-  })
-
-  const designBtn = bar.querySelector('.ss-hint-design')
-  designBtn?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    showDesignPopup()
-  })
-
-  const historyBtn = bar.querySelector('.ss-hint-history')
-  historyBtn?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    showHistoryPanel()
-  })
-
-  // Async quota warning for free users
-  getLicenseStatus().then(status => {
-    if (status.isPro) return
-    const used = status.dailyUsed
-    const limit = status.dailyLimit
-    const pct = used / limit
-    if (pct < 0.5) return
-    const remaining = limit - used
-    const color = pct >= 0.9 ? '#f87171' : '#fbbf24'
-    const quotaSpan = document.createElement('span')
-    quotaSpan.style.cssText = `margin-left:6px;font-size:10px;color:${color};border:1px solid ${color}33;border-radius:3px;padding:1px 6px;cursor:pointer;`
-    quotaSpan.textContent = remaining <= 0 ? '0 left · Upgrade →' : `${remaining}/${limit} left`
-    quotaSpan.title = 'Upgrade to Pro for unlimited extractions'
-    quotaSpan.addEventListener('click', (e) => { e.stopPropagation(); showUpgradeModal() })
-    bar.insertBefore(quotaSpan, bar.querySelector('.ss-hint-action'))
-  })
-
-  // Fade in
-  requestAnimationFrame(() => {
-    bar.style.opacity = '1'
-  })
-}
-
-function hideHintBar() {
-  const bar = $$('stylesnap-hint-bar')
-  if (bar) {
-    bar.style.opacity = '0'
-    bar.addEventListener('transitionend', () => bar.remove(), { once: true })
-    setTimeout(() => bar.remove(), 350)
-  }
-}
-
-// ─── Toast Notification ────────────────────────────────────────────────
-// showToast / showToastImpl now imported from ./ui
-
-// ─── History Panel ────────────────────────────────────────────────────
-function showHistoryPanel() {
-  const existing = $$('stylesnap-history-popup')
-  if (existing) { existing.remove(); return }
-  closeHintPopups('stylesnap-history-popup')
-
-  const popup = document.createElement('div')
-  popup.id = 'stylesnap-history-popup'
-  popup.setAttribute('data-stylesnap', 'true')
-  Object.assign(popup.style, {
-    position: 'fixed',
-    zIndex: '999994',
-    background: 'rgba(15, 23, 42, 0.97)',
-    border: '1px solid rgba(99, 102, 241, 0.3)',
-    borderRadius: '10px',
-    padding: '12px',
-    width: '260px',
-    maxHeight: '380px',
-    overflowY: 'auto',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#e2e8f0',
-    fontSize: '12px',
-  })
-  const hint = $$('stylesnap-hint-bar')
-  if (hint && window.getComputedStyle(hint).opacity !== '0') {
-    const hRect = hint.getBoundingClientRect()
-    popup.style.top = `${hRect.bottom + 6}px`
-    popup.style.left = '50%'
-    popup.style.transform = 'translateX(-50%)'
-  } else {
-    popup.style.top = '60px'
-    popup.style.right = '24px'
-  }
-
-  const timeAgo = (ts: number) => {
-    const s = Math.round((Date.now() - ts) / 1000)
-    if (s < 60) return `${s}s ago`
-    const m = Math.round(s / 60)
-    if (m < 60) return `${m}m ago`
-    return `${Math.round(m/60)}h ago`
-  }
-
-  const renderItems = () => {
-    if (S.history.length === 0) return `<div style="padding:16px;text-align:center;color:#94a3b8;">No history yet — lock elements with click</div>`
-    return S.history.map((item, i) => `
-      <div class="ss-history-item" data-idx="${i}" style="margin-bottom:6px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);cursor:pointer;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:600;font-size:11px;color:#a5b4fc;">&lt;${item.tag}&gt;</span>
-          <span style="font-size:10px;color:#64748b;">${timeAgo(item.timestamp)}</span>
-        </div>
-        <div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.selector}</div>
-        <div style="font-size:9px;color:#475569;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;">${item.snippet.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-      </div>`).join('')
-  }
-
-  popup.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-      <span style="font-weight:600;font-size:13px;">History</span>
-      <span style="font-size:11px;color:#64748b;">${S.history.length} items</span>
-      <button id="ss-history-close" style="margin-left:auto;background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
-    </div>
-    <div id="ss-history-list">${renderItems()}</div>
-  `
-  stAppend(popup)
-
-  popup.querySelector('#ss-history-close')?.addEventListener('click', () => popup.remove())
-
-  popup.querySelectorAll('.ss-history-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const idx = parseInt((item as HTMLElement).dataset.idx || '0')
-      const snap = S.history[idx]
-      if (!snap) return
-      popup.remove()
-      // Prefer the exact element we locked before (stored reference); only fall
-      // back to the selector (first match) if it has been detached from the DOM.
-      let target: Element | null = snap.el && document.body.contains(snap.el) ? snap.el : null
-      if (!target) { try { target = document.querySelector(snap.selector) } catch (_) {} }
-      if (target && document.body.contains(target)) {
-        // Element still exists — lock and show overlay
-        unlockElement()
-        lockElement(target as Element)
-        const parsedCSS = parseElement(target)
-        S.lastParsedCSS = parsedCSS
-        showOverlay(target, parsedCSS)
-        showToast(`Re-locked <${snap.tag}>`)
-      } else {
-        showToast('Element no longer on this page — inspect a similar element')
-      }
-    })
-  })
-
-  attachOutsideClose(popup, { delay: 200 })
-}
-
-// ─── Export Dropdown Menu ─────────────────────────────────────────────
-
-
 // ─── CodePen Export Helpers ─────────────────────────────────────────
 
 function getComponentCSSForExport(el: Element): string {
@@ -1752,428 +1534,10 @@ function exportCSSToCodePen() {
   })
 }
 
-/**
- * Check if any node in the component tree matches a CSS selector
- */
-function matchesAnyNode(treeNodes: Element[], selector: string): boolean {
-  for (const node of treeNodes) {
-    try { if (node.matches(selector)) return true } catch (_) {}
-  }
-  return false
-}
-
-/**
- * Parse CSS properties from raw rule body or full rule.cssText.
- * Handles both "prop: val; prop2: val2" and "selector { prop: val; }"
- */
-function parseRulePropsRaw(text: string): Record<string, string> {
-  const result: Record<string, string> = {}
-  if (!text) return result
-  // If it's a full rule.cssText, extract just the body
-  const body = text.match(/\{([^}]*)\}/)?.[1] || text
-  for (const part of body.split(';')) {
-    const idx = part.indexOf(':')
-    if (idx === -1) continue
-    const prop = part.substring(0, idx).trim()
-    const value = part.substring(idx + 1).trim()
-    if (prop && value) result[prop] = value
-  }
-  return result
-}
-
-/**
- * Extract pseudo-class from selector text.
- * e.g. ".demo-btn:hover" → "hover", returns null if none
- */
-function extractPseudoFromSelector(selector: string): string | null {
-  const m = selector.match(/:(hover|focus|active|visited|link|target)/)
-  return m ? m[1] : null
-}
-
-
 function onScroll() {
   if (!isActive()) return
   const target = S.lockedElement || S.lastHighlighted
   if (target) updateGuides(target.getBoundingClientRect())
-}
-
-// ─── Floating Button UI ────────────────────────────────────────────────
-
-function injectFloatingBtnStyles() {
-  if (document.getElementById('stylesnap-btn-style')) return
-  const style = document.createElement('style')
-  style.id = 'stylesnap-btn-style'
-  style.textContent = `
-    #stylesnap-floating-btn {
-      position: fixed !important;
-      bottom: 24px !important;
-      right: 24px !important;
-      padding: 0 !important;
-      border-radius: 50% !important;
-      cursor: pointer !important;
-      z-index: 9999999 !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease !important;
-      user-select: none !important;
-      border: none !important;
-      outline: none !important;
-      background: transparent !important;
-      overflow: visible !important;
-      display: flex !important;
-      align-items: center !important;
-      box-sizing: border-box !important;
-      width: 44px !important;
-      height: 44px !important;
-      opacity: 0.75 !important;
-    }
-    #stylesnap-floating-btn:hover,
-    #stylesnap-floating-btn.is-active,
-    #stylesnap-floating-btn.is-dragging {
-      opacity: 1 !important;
-    }
-
-    /* ── Inner circle ── */
-    #stylesnap-floating-btn-inner {
-      position: relative !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      width: 44px !important;
-      height: 44px !important;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
-      border-radius: 50% !important;
-      z-index: 2 !important;
-      box-sizing: border-box !important;
-      box-shadow: 0 2px 6px rgba(99, 102, 241, 0.15) !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s !important;
-    }
-    #stylesnap-floating-btn:hover #stylesnap-floating-btn-inner,
-    #stylesnap-floating-btn.is-dragging #stylesnap-floating-btn-inner {
-      transform: scale(1.06) translateY(-2px) !important;
-    }
-    #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
-      background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
-      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.55) !important;
-    }
-
-    /* ── Streaming light ring (active state) ── */
-    #stylesnap-floating-btn-ring {
-      position: absolute !important;
-      top: -2px !important; left: -2px !important;
-      width: calc(100% + 4px) !important; height: calc(100% + 4px) !important;
-      border-radius: 50% !important;
-      overflow: hidden !important;
-      z-index: 1 !important;
-      pointer-events: none !important;
-      opacity: 0 !important;
-      transition: opacity 0.25s !important;
-    }
-    #stylesnap-floating-btn-ring::before {
-      content: '' !important;
-      position: absolute !important;
-      top: 50% !important; left: 50% !important;
-      width: 200% !important; height: 200% !important;
-      margin-top: -100% !important; margin-left: -100% !important;
-      transform-origin: center center !important;
-      animation: stylesnap-shimmer 3s linear infinite !important;
-      background: conic-gradient(
-        from 0deg,
-        transparent 0deg,
-        rgba(99, 102, 241, 0.15) 20deg,
-        rgba(99, 102, 241, 0.5) 30deg,
-        #818cf8 36deg,
-        #a78bfa 42deg,
-        rgba(139, 92, 246, 0.5) 48deg,
-        transparent 60deg,
-        transparent 130deg,
-        rgba(99, 102, 241, 0.15) 140deg,
-        rgba(99, 102, 241, 0.5) 150deg,
-        #818cf8 156deg,
-        #a78bfa 162deg,
-        rgba(139, 92, 246, 0.5) 168deg,
-        transparent 180deg,
-        transparent 250deg,
-        rgba(99, 102, 241, 0.15) 260deg,
-        rgba(99, 102, 241, 0.5) 270deg,
-        #818cf8 276deg,
-        #a78bfa 282deg,
-        rgba(139, 92, 246, 0.5) 288deg,
-        transparent 300deg,
-        transparent 360deg
-      ) !important;
-    }
-    #stylesnap-floating-btn.is-active #stylesnap-floating-btn-ring {
-      opacity: 1 !important;
-    }
-
-    /* ── Mode badge (bottom-right corner of ball) ── */
-    .stylesnap-mode-badge {
-      position: absolute !important;
-      bottom: -1px !important;
-      right: -1px !important;
-      min-width: 20px !important;
-      height: 16px !important;
-      background: rgba(99,102,241,0.85) !important;
-      border: none !important;
-      border-radius: 5px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      z-index: 3 !important;
-      pointer-events: none !important;
-      padding: 0 5px !important;
-      font-size: 11px !important;
-      font-weight: 600 !important;
-      color: #fff !important;
-      line-height: 1 !important;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
-    }
-    .stylesnap-mode-badge svg {
-      width: 11px !important;
-      height: 11px !important;
-      color: #fff !important;
-    }
-
-    /* ── Logo icon ── */
-    .stylesnap-logo-icon {
-      width: 26px !important;
-      height: 26px !important;
-      background: #fff !important;
-      color: #6366f1 !important;
-      border-radius: 8px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      font-size: 15px !important;
-      font-weight: 900 !important;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
-      font-family: ui-sans-serif, system-ui, sans-serif !important;
-      box-sizing: border-box !important;
-      transition: color 0.2s, transform 0.2s !important;
-    }
-    #stylesnap-floating-btn:active .stylesnap-logo-icon {
-      transform: scale(0.9) !important;
-    }
-
-    /* ── Compare highlight (Bug 3) ── */
-    .stylesnap-compare-highlight {
-      outline: 2px dashed #fbbf24 !important;
-      outline-offset: 1px !important;
-      transition: outline 0.1s ease !important;
-    }
-
-    /* ── Rotate animation ── */
-    @keyframes stylesnap-shimmer {
-      0%   { transform: rotate(0deg); }
-      50%  { transform: rotate(180deg); }
-      100% { transform: rotate(360deg); }
-    }
-  `
-  document.head.appendChild(style)
-}
-
-let _fbInitializing = false
-let _fbResizeHandler: (() => void) | null = null
-async function initFloatingButton() {
-  // Synchronous re-entrancy guard: the async storage callback below opens a
-  // window where a second call (e.g. onExecute's 1500ms retry) could create a
-  // duplicate button. Bail immediately if one exists or init is in flight.
-  if (_fbInitializing || $$(FLOATING_BTN_ID)) return
-  _fbInitializing = true
-  chrome.storage.local.get(['stylesnap_settings'], async (res) => {
-   try {
-    const s = res.stylesnap_settings || {}
-    if (s.showFloatingBtn === false) {
-      const existing = $$(FLOATING_BTN_ID)
-      if (existing) existing.remove()
-      return
-    }
-    if ($$(FLOATING_BTN_ID)) return
-
-    const lang = await detectLang()
-    const t = translations[lang] || translations.en
-
-    // restore settings
-    if (s.lastUsedMode !== undefined && s.lastUsedMode !== 0) {
-      S.lastMode = s.lastUsedMode as number
-    }
-    S.inspectMode = 0  // always start inactive; user must click to activate
-
-    injectFloatingBtnStyles()
-
-    const btn = document.createElement('button')
-    btn.id = FLOATING_BTN_ID
-    btn.setAttribute('data-stylesnap', 'true')
-    btn.title = t.btnTooltip
-
-    btn.innerHTML = `
-      <div id="stylesnap-floating-btn-ring"></div>
-      <div id="stylesnap-floating-btn-inner">
-        <div class="stylesnap-logo-icon">S</div>
-        <div class="stylesnap-mode-badge"></div>
-      </div>
-    `
-
-    // ─── Drag ───
-    let isDragging = false
-    let hasMoved = false
-    let startX = 0, startY = 0
-    let initialRight = 24, initialBottom = 24
-    let posCustomized = false  // F6: only persist position once the user has actually moved it
-
-    chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
-      if (res.stylesnap_btn_pos) {
-        posCustomized = true
-        btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
-        btn.style.setProperty('bottom', `${res.stylesnap_btn_pos.bottom}px`, 'important')
-      }
-    })
-
-    // Window-level drag listeners are added only for the duration of a drag
-    // (mousedown→mouseup) so they never accumulate across re-inits. (F1)
-    const onDragMove = (e: MouseEvent) => {
-      if (!isDragging) return
-      const dx = e.clientX - startX
-      const dy = e.clientY - startY
-      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) hasMoved = true
-      if (hasMoved) {
-        const padding = 10, btnSize = 44
-        const newRight = Math.max(padding, Math.min(initialRight - dx, window.innerWidth - btnSize - padding))
-        const newBottom = Math.max(padding, Math.min(initialBottom - dy, window.innerHeight - btnSize - padding))
-        btn.style.setProperty('right', `${newRight}px`, 'important')
-        btn.style.setProperty('bottom', `${newBottom}px`, 'important')
-      }
-    }
-    const onDragEnd = () => {
-      if (!isDragging) return
-      isDragging = false
-      window.removeEventListener('mousemove', onDragMove)
-      window.removeEventListener('mouseup', onDragEnd)
-      btn.classList.remove('is-dragging')
-      btn.style.setProperty('cursor', 'pointer', 'important')
-      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
-      if (hasMoved) {
-        const rect = btn.getBoundingClientRect()
-        posCustomized = true
-        chrome.storage.local.set({
-          stylesnap_btn_pos: { right: window.innerWidth - rect.right, bottom: window.innerHeight - rect.bottom },
-        })
-      }
-    }
-
-    btn.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return
-      isDragging = true
-      hasMoved = false
-      startX = e.clientX
-      startY = e.clientY
-      const rect = btn.getBoundingClientRect()
-      initialRight = window.innerWidth - rect.right
-      initialBottom = window.innerHeight - rect.bottom
-      btn.classList.add('is-dragging')
-      btn.style.setProperty('cursor', 'grabbing', 'important')
-      btn.style.setProperty('transition', 'opacity 0.3s ease', 'important')
-      window.addEventListener('mousemove', onDragMove)
-      window.addEventListener('mouseup', onDragEnd)
-      e.preventDefault()
-    })
-
-    // ─── Resize boundary clamp ───
-    // Remove-before-add so re-inits never stack resize listeners. (F1)
-    if (_fbResizeHandler) window.removeEventListener('resize', _fbResizeHandler)
-    _fbResizeHandler = () => {
-      const b = $$(FLOATING_BTN_ID)
-      if (!b) return
-      const rect = b.getBoundingClientRect()
-      const padding = 10, btnSize = 44
-      const right = Math.max(padding, Math.min(window.innerWidth - rect.right, window.innerWidth - btnSize - padding))
-      const bottom = Math.max(padding, Math.min(window.innerHeight - rect.bottom, window.innerHeight - btnSize - padding))
-      b.style.setProperty('right', `${right}px`, 'important')
-      b.style.setProperty('bottom', `${bottom}px`, 'important')
-      // F6: only persist if the user has customized the position — never overwrite
-      // the default "bottom-right" anchor just because the window was resized.
-      if (posCustomized) chrome.storage.local.set({ stylesnap_btn_pos: { right, bottom } })
-    }
-    window.addEventListener('resize', _fbResizeHandler)
-
-    // ─── Button action ───
-    const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
-
-    // Main ball click → toggle inspect mode on/off
-    btnInner?.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      if (hasMoved) return
-
-      if (!isActive()) {
-        // Enter inspect mode (default: Inspect = 1)
-        setInspectMode(S.lastMode > 0 ? S.lastMode : 1)
-      } else {
-        // Exit inspect mode
-        setInspectMode(0)
-      }
-    })
-
-    stAppend(btn)
-
-    // sync initial mode UI (S.inspectMode is always 0 on load; just render badge)
-    updateModeUI()
-
-    // ─── First-install onboarding bubble ────────────────────────────
-    chrome.storage.local.get(['stylesnap_onboarded'], (ob) => {
-      if (ob.stylesnap_onboarded) return
-      const bubble = document.createElement('div')
-      bubble.id = 'ss-onboard-bubble'
-      bubble.setAttribute('data-stylesnap', 'true')
-      bubble.innerHTML = '👆 <span style="font-weight:600;">Click to inspect any element</span>'
-      Object.assign(bubble.style, {
-        position: 'fixed',
-        zIndex: '9999993',
-        bottom: '74px',
-        right: '24px',
-        background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
-        color: '#fff',
-        padding: '8px 14px',
-        borderRadius: '8px',
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '12px',
-        boxShadow: '0 4px 16px rgba(99,102,241,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        whiteSpace: 'nowrap',
-        animation: 'ss-bubble-pulse 1.5s ease-in-out 3',
-        pointerEvents: 'none',
-      })
-      // Arrow pointing down to button
-      const arrow = document.createElement('div')
-      Object.assign(arrow.style, {
-        position: 'absolute', bottom: '-6px', right: '24px',
-        width: '0', height: '0',
-        borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
-        borderTop: '6px solid #8b5cf6',
-      })
-      bubble.appendChild(arrow)
-      stAppend(bubble)
-
-      // Dismiss on first interaction. Bind to btnInner (which receives the click);
-      // binding to btn would never fire because btnInner stops propagation. (F5)
-      let bubbleTimer = 0
-      const dismiss = () => {
-        if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = 0 }
-        bubble.remove()
-        chrome.storage.local.set({ stylesnap_onboarded: true })
-        btnInner?.removeEventListener('click', dismiss)
-      }
-      btnInner?.addEventListener('click', dismiss)
-      // Auto-dismiss after 8s (cleared if dismissed earlier)
-      bubbleTimer = window.setTimeout(dismiss, 8000)
-    })
-
-    // NOT auto-activating any mode on page load — user must click to activate
-   } finally {
-     _fbInitializing = false
-   }
-  })
 }
 
 // Export for @crxjs/vite-plugin loader
