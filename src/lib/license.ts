@@ -202,20 +202,37 @@ export async function validateLicense(licenseKey: string, instanceId?: string): 
     const data = await res.json()
 
     if (data.valid) {
-      // Refresh stored license data
+      // Refresh stored license data and record successful validation timestamp
       const current = await getLicenseStatus()
       const payload: Partial<LicenseStatus> = {
         ...current,
       }
       await chrome.storage.local.set({ [STORAGE_KEYS.LICENSE]: payload })
+      await chrome.storage.local.set({
+        stylesnap_last_validated_at: Date.now(),
+        stylesnap_offline_fail_count: 0,
+      })
     }
 
     return {
       valid: data.valid === true,
     }
   } catch {
-    // Network error — trust local cache, don't revoke
-    return { valid: true }
+    // Network error — allow a 7-day grace period since last successful validation
+    const GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000
+    const stored = await chrome.storage.local.get([
+      'stylesnap_last_validated_at',
+      'stylesnap_offline_fail_count',
+    ])
+    const lastValidatedAt = stored['stylesnap_last_validated_at'] as number | undefined
+    const failCount = (stored['stylesnap_offline_fail_count'] as number | undefined) ?? 0
+
+    await chrome.storage.local.set({ stylesnap_offline_fail_count: failCount + 1 })
+
+    if (lastValidatedAt && (Date.now() - lastValidatedAt) < GRACE_PERIOD_MS) {
+      return { valid: true }
+    }
+    return { valid: false }
   }
 }
 
@@ -289,45 +306,6 @@ export async function getLicenseKeyDetails(licenseKeyId: string): Promise<{
   } catch {
     return { success: false, error: 'Failed to fetch license details.' }
   }
-}
-
-// ─── Legacy compat (email-based activation) ──────────────────────────────────
-
-/**
- * @deprecated Use activateLicenseKey() instead.
- * Legacy email-based activation — kept for backward compatibility.
- */
-export async function activateLicense(email: string): Promise<boolean> {
-  const normalized = email.trim().toLowerCase()
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!emailPattern.test(normalized)) return false
-
-  try {
-    const res = await proxyFetch(`${PROXY_BASE_URL}/api/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: normalized }),
-    })
-    const data = await res.json()
-
-    if (!data.valid) return false
-
-    const payload: Partial<LicenseStatus> = {
-      isPro:      true,
-      dailyUsed:  0,
-      dailyLimit: Infinity,
-      email:      normalized,
-      licenseKey: data.license_key || data.payment_id || `dodo_${Date.now()}`,
-    }
-    await chrome.storage.local.set({ [STORAGE_KEYS.LICENSE]: payload })
-    return true
-  } catch {
-    return false
-  }
-}
-
-export async function deactivateLicense(): Promise<void> {
-  await deactivateLicenseInstance()
 }
 
 // ─── Periodic Validation ─────────────────────────────────────────────────────

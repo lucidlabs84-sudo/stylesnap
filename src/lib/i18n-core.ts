@@ -44,11 +44,7 @@ export async function detectLang(): Promise<Language> {
   const browser = detectFromBrowser()
   if (browser) return browser
 
-  // 3. IP geolocation
-  const ip = await detectFromIP()
-  if (ip) return ip
-
-  // 4. Fallback
+  // 3. Fallback
   return 'en'
 }
 

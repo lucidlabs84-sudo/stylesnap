@@ -1,44 +1,33 @@
 /**
  * Feedback submission — StyleSnap Extension
- * Stores to Supabase feedback table (anon insert, RLS enabled)
+ * Proxies to the StyleSnap serverless API; no Supabase keys in the bundle.
  */
 
-const SUPABASE_URL = 'https://wwsjfjrbqlarzyjwpyys.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3c2pmanJicWxhcnp5andweXlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MDEyNzUsImV4cCI6MjA5NjI3NzI3NX0.It6-uL7XQdVNrm7TU-VSBQGRWZhg3UQuWyljpY1hykA'
+import { PROXY_BASE_URL } from '@/shared/constants'
 
 export interface FeedbackPayload {
   type: 'bug' | 'feature' | 'general' | 'praise'
   message: string
   email?: string
   rating?: number
+  metadata?: Record<string, unknown>
 }
 
 export async function submitFeedback(payload: FeedbackPayload): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/feedback`, {
+    const res = await fetch(`${PROXY_BASE_URL}/api/feedback`, {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
+        'Content-Type':   'application/json',
+        'x-extension-id': chrome.runtime.id,
       },
-      body: JSON.stringify({
-        source: 'extension',
-        type: payload.type,
-        message: payload.message.trim(),
-        email: payload.email?.trim() || null,
-        rating: payload.rating ?? null,
-        metadata: {
-          version: chrome.runtime?.getManifest?.()?.version || 'unknown',
-          lang: navigator.language,
-        },
-      }),
+      body: JSON.stringify(payload),
     })
 
-    if (!res.ok) {
-      const text = await res.text()
-      return { ok: false, error: text || `HTTP ${res.status}` }
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || `HTTP ${res.status}` }
     }
     return { ok: true }
   } catch (err) {

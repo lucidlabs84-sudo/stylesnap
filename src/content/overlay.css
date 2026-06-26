@@ -100,7 +100,7 @@ body.stylesnap-mode-grid *:not([data-stylesnap="true"]):not([data-stylesnap="tru
 
 .stylesnap-guide {
   position: fixed;
-  background-color: rgba(147, 51, 234, 0.5);
+  background-color: rgba(99, 102, 241, 0.65);
   z-index: var(--ss-z-float);
   pointer-events: none;
   display: none;
@@ -108,8 +108,10 @@ body.stylesnap-mode-grid *:not([data-stylesnap="true"]):not([data-stylesnap="tru
 body.stylesnap-mode-guidelines .stylesnap-guide {
   display: block;
 }
-#stylesnap-guide-t, #stylesnap-guide-b { left: 0; right: 0; height: 1px; }
-#stylesnap-guide-l, #stylesnap-guide-r { top: 0; bottom: 0; width: 1px; }
+/* Horizontal crosshair: full viewport width, positioned at element center Y */
+#stylesnap-guide-h { left: 0; right: 0; height: 1px; }
+/* Vertical crosshair: full viewport height, positioned at element center X */
+#stylesnap-guide-v { top: 0; bottom: 0; width: 1px; }
 
 
 /* ═══════════════════════════════════════════════════════════
@@ -520,11 +522,6 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
 
 /* ── Edit mode CSS ── */
 /* Edit toggle removed. Always per-line view. */
-#stylesnap-overlay .ss-lock-hint {
-  color: var(--ss-text-muted);
-  font-size: var(--ss-font-xs);
-  font-family: var(--ss-font-sans);
-}
 
 /* ── Per-line property groups ── */
 #stylesnap-overlay .ss-props-list { padding: var(--ss-space-xs) 0; }
@@ -606,6 +603,8 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   flex-shrink: 0;
 }
 #stylesnap-overlay .ss-prop-row:hover .ss-val-copy-btn { opacity: 1; }
+#stylesnap-overlay .ss-val:hover .ss-val-edit-icon { opacity: 0.5 !important; }
+#stylesnap-overlay .ss-val[contenteditable="true"] .ss-val-edit-icon { display: none; }
 #stylesnap-overlay .ss-val-copy-btn:hover {
   color: var(--ss-primary-light);
   background: var(--ss-primary-bg);
@@ -662,22 +661,15 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   pointer-events: auto !important;
 }
 #stylesnap-overlay .ss-actions { display: flex; align-items: center; gap: var(--ss-space-xs); }
-#stylesnap-overlay .ss-status {
-  font-size: var(--ss-font-xs);
-  color: var(--ss-text-muted);
-  font-family: var(--ss-font-sans);
-  transition: color var(--ss-transition-slow);
-}
-
 #stylesnap-overlay .ss-copy-btn,
 #stylesnap-overlay .ss-export-btn {
   display: flex;
   align-items: center;
   gap: var(--ss-space-xs);
   font-size: var(--ss-font-xs);
-  color: var(--ss-primary-light);
-  background: var(--ss-primary-bg);
-  border: 1px solid var(--ss-primary-border);
+  color: var(--ss-primary-lighter);
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.38);
   border-radius: var(--ss-radius-md);
   padding: 3px 8px;
   cursor: pointer;
@@ -686,7 +678,7 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
 }
 #stylesnap-overlay .ss-copy-btn:hover,
 #stylesnap-overlay .ss-export-btn:hover {
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(99, 102, 241, 0.3);
 }
 
 #stylesnap-overlay .ss-ai-btn {
@@ -694,9 +686,9 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   align-items: center;
   gap: var(--ss-space-xs);
   font-size: var(--ss-font-xs);
-  color: var(--ss-accent-violet);
-  background: rgba(167, 139, 250, 0.1);
-  border: 1px solid rgba(167, 139, 250, 0.2);
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.18);
+  border: 1px solid rgba(167, 139, 250, 0.38);
   border-radius: var(--ss-radius-md);
   padding: 3px 8px;
   cursor: pointer;
@@ -704,8 +696,26 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   transition: background var(--ss-transition);
 }
 #stylesnap-overlay .ss-ai-btn:hover {
-  background: rgba(167, 139, 250, 0.25);
+  background: rgba(167, 139, 250, 0.32);
   border-color: rgba(167, 139, 250, 0.4);
+}
+
+#stylesnap-overlay .ss-tw-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-xs);
+  font-size: var(--ss-font-xs);
+  color: #67e8f9;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: var(--ss-radius-md);
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: var(--ss-font-sans);
+  transition: background var(--ss-transition), opacity var(--ss-transition);
+}
+#stylesnap-overlay .ss-tw-copy-btn:hover {
+  background: rgba(6, 182, 212, 0.22);
 }
 
 
@@ -875,3 +885,125 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   color: var(--ss-primary-lighter);
   margin: 0 2px;
 }
+
+/* ─── Collapsible sections ─────────────────────────────────────────── */
+#stylesnap-overlay .ss-collapsible-section {
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+#stylesnap-overlay .ss-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  cursor: pointer;
+  user-select: none;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+#stylesnap-overlay .ss-section-header:hover {
+  color: #94a3b8;
+  background: rgba(255,255,255,0.03);
+}
+#stylesnap-overlay .ss-section-body {
+  padding: 4px 8px 8px;
+}
+
+/* ─── Design panel ─────────────────────────────────────────────────── */
+#stylesnap-overlay .ss-design-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  padding: 2px;
+}
+#stylesnap-overlay .ss-design-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: system-ui, sans-serif;
+  transition: all 0.12s;
+}
+#stylesnap-overlay .ss-design-tab-active {
+  background: rgba(99,102,241,0.25);
+  color: #e2e8f0;
+}
+#stylesnap-overlay .ss-design-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+/* ─── Preview iframe ────────────────────────────────────────────────── */
+#stylesnap-overlay .ss-preview-iframe {
+  width: 100%;
+  height: 120px;
+  border: none;
+  border-radius: 4px;
+  background: #1e293b;
+  display: block;
+}
+
+/* ─── Unified scrollbar for hint-bar popups ─────────────────────────── */
+.ss-hint-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.25) transparent;
+}
+.ss-hint-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+.ss-hint-scroll::-webkit-scrollbar-track { background: transparent; }
+.ss-hint-scroll::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.25);
+  border-radius: 3px;
+}
+.ss-hint-scroll::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.45); }
+
+/* ─── Overlay: scrollbar flush with border ──────────────────────────── */
+#stylesnap-overlay {
+  scrollbar-gutter: stable !important;
+}
+
+/* ─── Side Panel: Box Model ─────────────────────────────────────────── */
+.ss-boxmodel { font-family: var(--ss-font-mono, monospace); font-size: 10px; }
+.ss-bm-margin {
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px dashed rgba(251, 191, 36, 0.4);
+  border-radius: 4px; padding: 14px 8px; text-align: center; position: relative;
+}
+.ss-bm-border {
+  background: rgba(96, 165, 250, 0.12);
+  border: 1px dashed rgba(96, 165, 250, 0.4);
+  border-radius: 4px; padding: 14px 8px; margin-top: 4px; position: relative;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.ss-bm-padding {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px dashed rgba(52, 211, 153, 0.4);
+  border-radius: 4px; padding: 14px 10px; position: relative; flex: 1;
+}
+.ss-bm-content {
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 3px; padding: 8px 6px; color: #c7d2fe; font-weight: 600;
+  text-align: center; white-space: nowrap;
+}
+.ss-bm-val { color: #94a3b8; font-size: 9px; line-height: 1; }
+.ss-bm-left, .ss-bm-right { align-self: center; }
+.ss-bm-top, .ss-bm-bot { display: block; text-align: center; }
+.ss-bm-edge-labels {
+  display: flex; justify-content: space-between; margin-top: 6px; font-size: 9px;
+}
+
+/* ─── Side Panel: collapsible scrollbar consistency ─────────────────── */
+#stylesnap-side-panel ::-webkit-scrollbar { width: 5px; height: 5px; }
+#stylesnap-side-panel ::-webkit-scrollbar-track { background: transparent; }
+#stylesnap-side-panel ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 3px; }
+#stylesnap-side-panel ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.45); }

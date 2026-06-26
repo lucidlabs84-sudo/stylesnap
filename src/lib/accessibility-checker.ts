@@ -125,7 +125,8 @@ export function checkElementAccessibility(el: Element): AccessibilityIssue[] {
   const tagName = el.tagName.toLowerCase()
   if (['a', 'button', 'input', 'select', 'textarea'].includes(tagName)) {
     // Check if :focus style is defined (simplified check)
-    const hasFocusStyle = el.matches(':focus') || computed.outline !== 'none' || parseInt(computed.outlineWidth) > 0
+    const hasOutline = computed.outlineStyle !== 'none' && parseInt(computed.outlineWidth) > 0
+    const hasFocusStyle = hasOutline
     if (!hasFocusStyle) {
       issues.push({
         type: 'focus',

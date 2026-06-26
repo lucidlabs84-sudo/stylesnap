@@ -41,7 +41,7 @@ let _licenseIsPro = false   // cached license status
 getLicenseStatus().then(s => { _licenseIsPro = s.isPro })
 
 // derived helpers
-const isActive = () => inspectMode > 0 && !document.getElementById('stylesnap-settings-popup') && !document.getElementById('stylesnap-palette-popup')
+const isActive = () => inspectMode > 0 && !$$('stylesnap-settings-popup') && !$$('stylesnap-design-popup')
 const assistMode = () => (inspectMode >= 2 ? inspectMode - 1 : 0) // 0=off, 1=lines, 2=grid
 
 const OVERLAY_ID = 'stylesnap-overlay'
@@ -60,11 +60,13 @@ function getStShadow(): ShadowRoot {
   host.setAttribute('data-stylesnap', 'true')
   Object.assign(host.style, {
     position: 'fixed', top: '0', left: '0', width: '0', height: '0', zIndex: '9999990',
+    overflow: 'visible',
   })
   document.body.appendChild(host)
   _stShadow = host.attachShadow({ mode: 'open' })
   const fbStyle = document.createElement('style')
-  fbStyle.textContent = SHADOW_FLOATING_BTN_CSS + '\n' + SHADOW_HINT_BAR_CSS + '\n' + OVERLAY_CSS
+  fbStyle.textContent = SHADOW_FLOATING_BTN_CSS + '\n' + SHADOW_HINT_BAR_CSS + '\n' + OVERLAY_CSS + '\n' +
+    '@keyframes ss-bubble-pulse { 0%, 100% { transform: translateY(0); box-shadow: 0 4px 16px rgba(99,102,241,0.5); } 50% { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(99,102,241,0.7); } }'
   _stShadow.appendChild(fbStyle)
   return _stShadow
 }
@@ -72,10 +74,51 @@ function stAppend(el: HTMLElement) { getStShadow().appendChild(el) }
 function $$(id: string): HTMLElement | null {
   return (_stShadow ? _stShadow.getElementById(id) : null) || document.getElementById(id)
 }
+
+/**
+ * Attach "click-outside (and optional Esc) to close" to a shadow-DOM panel,
+ * with leak-proof cleanup: a MutationObserver tears down the document-level
+ * listeners whenever the panel leaves the DOM — regardless of which path
+ * removed it (close button, item click, mutual-exclusion, programmatic remove).
+ * Uses composedPath() so clicks inside the shadow tree are correctly detected.
+ * Returns a close() that removes the panel and runs onClose.
+ */
+function attachOutsideClose(
+  panel: HTMLElement,
+  opts: { onClose?: () => void; esc?: boolean; delay?: number } = {},
+): () => void {
+  let done = false
+  const cleanup = () => {
+    if (done) return
+    done = true
+    document.removeEventListener('click', onClick)
+    if (opts.esc) document.removeEventListener('keydown', onKey)
+    obs.disconnect()
+  }
+  const close = () => {
+    cleanup()
+    if (panel.isConnected) panel.remove()
+    opts.onClose?.()
+  }
+  const onClick = (ev: MouseEvent) => { if (!ev.composedPath().includes(panel)) close() }
+  const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.stopPropagation(); close() } }
+  // Auto-cleanup the moment the panel is detached, by any code path.
+  const root = panel.getRootNode() as ShadowRoot | Document
+  const obs = new MutationObserver(() => { if (!panel.isConnected) cleanup() })
+  obs.observe(root, { childList: true, subtree: true })
+  // Defer so the click that opened the panel doesn't immediately close it.
+  setTimeout(() => {
+    if (done) return
+    document.addEventListener('click', onClick)
+    if (opts.esc) document.addEventListener('keydown', onKey)
+  }, opts.delay ?? 100)
+  return close
+}
 // editMode removed — always per-line view with grouped categories
 let _lastParsedCSS: ParsedCSS | null = null  // cached for compare/export
 let _overlayCleanup: (() => void) | null = null  // Floating UI autoUpdate cleanup
 let _overlayGen = 0  // generation counter to discard stale position updates
+const _history: Array<{tag: string, selector: string, snippet: string, parsedCSS: ParsedCSS | null, timestamp: number}> = []
 
 // Detect CSS color values
 function isColorValue(val: string): boolean {
@@ -96,6 +139,12 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/** Safe className accessor — SVG elements expose SVGAnimatedString (no .split/.replace) */
+function classNameOf(el: Element): string {
+  const cn = (el as HTMLElement).className
+  return typeof cn === 'string' ? cn : (el.getAttribute('class') || '')
+}
+
 // Get color preview block HTML
 function colorBlock(val: string): string {
   // Only pass through if it's a safe CSS color value; strip quotes and escape for style attr
@@ -106,12 +155,14 @@ function colorBlock(val: string): string {
 // ─── Display format preferences ────────────────────────────────────────
 let _colorFormat: 'rgb' | 'hex' | 'hsl' = 'rgb'
 let _shortenCSS = true
+let _showSidePanel = true
 
 function reloadFormatSettings() {
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
     const s = res.stylesnap_settings || {}
     _colorFormat = s.colorFormat || 'rgb'
     _shortenCSS = s.shortenCSS !== false
+    _showSidePanel = s.showSidePanel !== false
   })
 }
 
@@ -170,7 +221,7 @@ function shortenColor(value: string): string {
   return value
 }
 
-function shortenValue(prop: string, value: string): string {
+function shortenValue(_prop: string, value: string): string {
   // 0px → 0
   if (/^0[a-z%]*$/i.test(value) && value !== '0') return '0'
   // Clean unnecessary precision: 12.000px → 12px
@@ -248,6 +299,7 @@ function applyInspectorListeners(add: boolean) {
   document.documentElement[method]('click', onClick as EventListener, true)
   document.documentElement[method]('keydown', onKeyDown as EventListener, true)
   document.documentElement[method]('scroll', onScroll as EventListener, true)
+  if (!add && _mmRaf) { cancelAnimationFrame(_mmRaf); _mmRaf = 0; _mmEvent = null }
 }
 
 function setInspectMode(newMode: number) {
@@ -284,7 +336,7 @@ function setInspectMode(newMode: number) {
 // ─── Guides ───────────────────────────────────────────────────────────
 
 function initGuides() {
-  const ids = ['stylesnap-guide-t', 'stylesnap-guide-b', 'stylesnap-guide-l', 'stylesnap-guide-r']
+  const ids = ['stylesnap-guide-h', 'stylesnap-guide-v']
   ids.forEach(id => {
     if (!document.getElementById(id)) {
       const el = document.createElement('div')
@@ -298,15 +350,11 @@ function initGuides() {
 
 function updateGuides(rect: DOMRect) {
   if (assistMode() !== 1) return
-  const t = document.getElementById('stylesnap-guide-t')
-  const b = document.getElementById('stylesnap-guide-b')
-  const l = document.getElementById('stylesnap-guide-l')
-  const r = document.getElementById('stylesnap-guide-r')
-  if (t && b && l && r) {
-    t.style.top = `${rect.top}px`
-    b.style.top = `${rect.bottom}px`
-    l.style.left = `${rect.left}px`
-    r.style.left = `${rect.right}px`
+  const h = document.getElementById('stylesnap-guide-h')
+  const v = document.getElementById('stylesnap-guide-v')
+  if (h && v) {
+    h.style.top = `${rect.top + rect.height / 2}px`
+    v.style.left = `${rect.left + rect.width / 2}px`
   }
 }
 
@@ -423,6 +471,12 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   // Cache locked styles for compare diffing
   _lockedCSS = { ...styles }
 
+  // ─── Immediate position reset to avoid flash at stale position
+  overlay.style.setProperty('left', `${Math.round(rect.left)}px`, 'important')
+  overlay.style.setProperty('top', `${Math.round(rect.bottom + 4)}px`, 'important')
+
+  // ─── Filter browser defaults ──────────────────────────
+
   // ─── Filter browser defaults ──────────────────────────
   const filteredStyles = filterDefaultStyles(el, styles)
   const allProps = Object.entries(filteredStyles)
@@ -451,7 +505,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const perLineProp = (k: string, v: string) => {
     const displayVal = formatDisplayValue(k, v)
     const cBlock = isColorValue(v) ? colorBlock(v) : ''
-    return `<span class="ss-prop-row"><span class="ss-prop">${escapeHtml(k)}:</span> ${cBlock}<span class="ss-val" data-prop="${escapeHtml(k)}" data-original="${escapeHtml(v)}">${escapeHtml(displayVal)}</span>;<button class="ss-val-copy-btn" data-text="${escapeHtml(`${k}: ${displayVal};`)}" title="Copy"><svg ${SVG} width="9" height="9"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></span>`
+    return `<span class="ss-prop-row"><span class="ss-prop">${escapeHtml(k)}:</span> ${cBlock}<span class="ss-val" data-prop="${escapeHtml(k)}" data-original="${escapeHtml(v)}" title="Click to edit">${escapeHtml(displayVal)}<svg class="ss-val-edit-icon" ${SVG} width="9" height="9" style="opacity:0;margin-left:3px;vertical-align:middle;transition:opacity 0.15s;flex-shrink:0;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>;<button class="ss-val-copy-btn" data-text="${escapeHtml(`${k}: ${displayVal};`)}" title="Copy"><svg ${SVG} width="9" height="9"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></span>`
   }
 
   // Flat list: all properties in one block, sorted logically
@@ -537,19 +591,18 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     <div class="ss-props-list"><pre class="ss-css ss-flat-list">${flatCSS}</pre>${pseudoHTML}${responsiveInline}</div>
     ${expandBtn}
     <div class="ss-footer">
-      <span class="ss-status">${isCurrentlyLocked
-        ? `<span class="ss-lock-hint">${t('switchElement')}</span>`
-        : `<span class="ss-lock-hint">${t('clickToLock')}</span>`
-      }</span>
       <div class="ss-actions">
         <button class="ss-copy-btn" title="${t('copyCSS')}">
-          <svg ${SVG} width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> ${t('copyCSS')}
+          <svg ${SVG} width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> CSS
         </button>
-        <button class="ss-ai-btn" title="AI Assistant">
-          <svg ${SVG} width="12" height="12" stroke="#a78bfa"><path d="M12 2a4 4 0 0 1 4 4c0 2-2 3-2 5h-4c0-2-2-3-2-5a4 4 0 0 1 4-4z"/><path d="M12 15v1"/></svg> AI
+        <button class="ss-tw-copy-btn" title="Copy Tailwind classes" style="opacity:${matchPct >= 30 ? '1' : '0.4'};">
+          <svg ${SVG} width="12" height="12"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M8 12s1-2 4-2 4 2 4 2"/></svg> TW
         </button>
-        <button class="ss-export-btn" title="Export to CodePen">
-          <svg ${SVG} width="12" height="12"><path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg> Export
+        <button class="ss-ai-btn" title="Generate AI Prompt">
+          <svg ${SVG} width="12" height="12" stroke="#a78bfa"><path d="M15 4 20 9 9 20 4 20 4 15Z"/><path d="m13 6 5 5"/></svg> Prompt
+        </button>
+        <button class="ss-export-btn" title="Open in CodePen">
+          <svg ${SVG} width="12" height="12"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg> CodePen
         </button>
       </div>
     </div>
@@ -704,7 +757,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     upgradeLink.addEventListener('click', (ev) => {
       ev.stopPropagation()
       ev.preventDefault()
-      showSettingsPopup()
+      showUpgradeModal()
     })
   }
 
@@ -735,6 +788,32 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     })
   }
 
+  // Footer TW copy button
+  const twCopyBtn = overlay.querySelector('.ss-tw-copy-btn') as HTMLElement | null
+  if (twCopyBtn && !twCopyBtn.dataset.bound) {
+    twCopyBtn.dataset.bound = 'true'
+    twCopyBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const target = lockedElement || lastHighlighted
+      if (!target) { showToast('Hover an element first'); return }
+      const twClasses = getTailwindClasses(target)
+      if (!twClasses) { showToast('No Tailwind classes found'); return }
+      navigator.clipboard.writeText(`class="${twClasses}"`).then(() => {
+        const origHTML = twCopyBtn.innerHTML
+        twCopyBtn.style.background = 'rgba(52, 211, 153, 0.25)'
+        twCopyBtn.style.borderColor = 'rgba(52, 211, 153, 0.5)'
+        twCopyBtn.style.color = '#34d399'
+        twCopyBtn.innerHTML = `<svg ${SVG} width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> Copied!`
+        setTimeout(() => {
+          twCopyBtn.innerHTML = origHTML
+          twCopyBtn.style.background = ''
+          twCopyBtn.style.borderColor = ''
+          twCopyBtn.style.color = ''
+        }, 1500)
+      }).catch(() => showToast('Copy failed'))
+    })
+  }
+
   // Footer Export button
   const exportBtn = overlay.querySelector('.ss-export-btn') as HTMLElement | null
   if (exportBtn && !exportBtn.dataset.bound) {
@@ -742,7 +821,7 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     exportBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
       if (!lockedElement) { showToast('Lock an element first'); return }
-      showExportMenu(exportBtn)
+      exportCSSToCodePen()
     })
   }
 
@@ -753,20 +832,163 @@ function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     aiBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
       if (!lockedElement) { showToast('Lock an element first'); return }
-      generateComponent()
+      showAIPrompt()
     })
+  }
+
+  // ─── Side panel (Box Model + Preview) — only when locked ───────────
+  if (_showSidePanel && isCurrentlyLocked) {
+    updateSidePanel(el as HTMLElement, parsedCSS, overlay)
+  } else {
+    hideSidePanel()
   }
 
 }
 
 function hideOverlay() {
   const overlay = $$(OVERLAY_ID)
-  if (overlay) overlay.style.setProperty('display', 'none', 'important')
+  if (overlay) {
+    overlay.style.setProperty('display', 'none', 'important')
+    // Clear cached HTML to ensure full re-render on next show
+    delete overlay.dataset.lastHtml
+  }
   // Clean up Floating UI autoUpdate listener
   if (_overlayCleanup) { _overlayCleanup(); _overlayCleanup = null }
   // Clean up any open export menu
   const menu = $$('stylesnap-export-menu')
   if (menu) menu.remove()
+  hideSidePanel()
+}
+
+// ─── Side Panel (Box Model + Preview) ────────────────────────────────
+const SIDE_PANEL_ID = 'stylesnap-side-panel'
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
+/** Box model content HTML (no wrapper) */
+function buildBoxModel(el: HTMLElement, rect: DOMRect): string {
+  const cs = window.getComputedStyle(el)
+  const get = (p: string) => {
+    const n = parseFloat(cs.getPropertyValue(p))
+    return isNaN(n) ? '0' : (n === Math.round(n) ? String(Math.round(n)) : n.toFixed(1))
+  }
+  const mt = get('margin-top'), mr = get('margin-right'), mb = get('margin-bottom'), ml = get('margin-left')
+  const bt = get('border-top-width'), br = get('border-right-width'), bb = get('border-bottom-width'), bl = get('border-left-width')
+  const pt = get('padding-top'), pr = get('padding-right'), pb = get('padding-bottom'), pl = get('padding-left')
+  const w = Math.round(rect.width), h = Math.round(rect.height)
+  return `<div class="ss-boxmodel">
+    <div class="ss-bm-margin">
+      <span class="ss-bm-val ss-bm-top">${mt}</span>
+      <div class="ss-bm-border">
+        <span class="ss-bm-val ss-bm-left">${ml}</span>
+        <div class="ss-bm-padding">
+          <span class="ss-bm-val ss-bm-top">${pt}</span>
+          <div class="ss-bm-content">${w}×${h}</div>
+          <span class="ss-bm-val ss-bm-bot">${pb}</span>
+        </div>
+        <span class="ss-bm-val ss-bm-right">${mr}</span>
+      </div>
+      <span class="ss-bm-val ss-bm-bot">${mb}</span>
+    </div>
+    <div class="ss-bm-edge-labels">
+      <span style="color:#60a5fa">B:${bt} ${br} ${bb} ${bl}</span>
+      <span style="color:#34d399">P:${pt} ${pr} ${pb} ${pl}</span>
+    </div>
+  </div>`
+}
+
+/** Preview iframe content (sandboxed, renders element HTML + extracted CSS) */
+function buildPreviewHTML(el: HTMLElement, parsedCSS: ParsedCSS | null): string {
+  const elHTML = el.outerHTML.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+  const cssStr = parsedCSS?.styles
+    ? Object.entries(parsedCSS.styles).map(([k, v]) => `${k}:${v}`).join(';')
+    : ''
+  const selector = parsedCSS?.selector || el.tagName.toLowerCase()
+  const srcDoc = `<!DOCTYPE html><html><head><style>
+    body{margin:8px;background:#1e293b;display:flex;align-items:flex-start;justify-content:center;padding:8px;}
+    ${selector}{${cssStr}}
+  </style></head><body>${elHTML}</body></html>`
+  return `<iframe sandbox="allow-same-origin" srcdoc="${escapeAttr(srcDoc)}" style="width:100%;height:130px;border:none;border-radius:4px;background:#1e293b;display:block;"></iframe>`
+}
+
+function updateSidePanel(el: HTMLElement, parsedCSS: ParsedCSS | null, overlay: HTMLElement) {
+  let panel = $$(SIDE_PANEL_ID)
+  if (!panel) {
+    panel = document.createElement('div')
+    panel.id = SIDE_PANEL_ID
+    panel.setAttribute('data-stylesnap', 'true')
+    Object.assign(panel.style, {
+      position: 'fixed', zIndex: '9999990',
+      background: 'rgba(15,23,42,0.97)',
+      border: '1px solid rgba(99,102,241,0.2)',
+      borderRadius: '10px', width: '220px',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.45)',
+      fontFamily: 'system-ui,sans-serif', fontSize: '11px',
+      color: '#e2e8f0', overflow: 'hidden',
+    })
+    stAppend(panel)
+  }
+
+  const rect = el.getBoundingClientRect()
+  const bm = buildBoxModel(el, rect)
+  const pv = buildPreviewHTML(el, parsedCSS)
+  const chevron = (open: boolean) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><polyline points="${open ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}"/></svg>`
+  const bmOpen = localStorage.getItem('ss-sp-boxmodel') !== '0'
+  const pvOpen = localStorage.getItem('ss-sp-preview') === '1'
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <span style="font-size:10px;font-weight:600;color:#64748b;letter-spacing:0.05em;text-transform:uppercase;">Inspector</span>
+      <button id="ss-sp-close" title="Close" style="background:none;border:none;color:#475569;cursor:pointer;padding:2px;display:flex;border-radius:3px;">${CLOSE_X}</button>
+    </div>
+    <div class="ss-sp-section">
+      <div class="ss-sp-header" data-key="ss-sp-boxmodel" data-open="${bmOpen ? '1' : '0'}" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;color:#64748b;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;user-select:none;">
+        <span>Box Model</span>${chevron(bmOpen)}
+      </div>
+      <div class="ss-sp-body" style="display:${bmOpen ? 'block' : 'none'};padding:4px 10px 10px;">${bm}</div>
+    </div>
+    <div class="ss-sp-section" style="border-top:1px solid rgba(255,255,255,0.05);">
+      <div class="ss-sp-header" data-key="ss-sp-preview" data-open="${pvOpen ? '1' : '0'}" style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;color:#64748b;font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;user-select:none;">
+        <span>Preview</span>${chevron(pvOpen)}
+      </div>
+      <div class="ss-sp-body" style="display:${pvOpen ? 'block' : 'none'};padding:0 8px 8px;">${pv}</div>
+    </div>
+  `
+
+  panel.querySelector('#ss-sp-close')?.addEventListener('click', () => panel!.remove())
+
+  panel.querySelectorAll('.ss-sp-header').forEach(h => {
+    h.addEventListener('click', () => {
+      const header = h as HTMLElement
+      const key = header.dataset.key || ''
+      const body = header.nextElementSibling as HTMLElement | null
+      const nowOpen = header.dataset.open !== '1'
+      header.dataset.open = nowOpen ? '1' : '0'
+      const poly = header.querySelector('polyline')
+      if (poly) poly.setAttribute('points', nowOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9')
+      if (body) body.style.display = nowOpen ? 'block' : 'none'
+      if (key) localStorage.setItem(key, nowOpen ? '1' : '0')
+    })
+  })
+
+  positionSidePanel(panel, overlay)
+}
+
+function positionSidePanel(panel: HTMLElement, overlay: HTMLElement) {
+  const ovRect = overlay.getBoundingClientRect()
+  const panelWidth = 220, gap = 8
+  let left = ovRect.right + gap
+  if (left + panelWidth > window.innerWidth - 8) left = ovRect.left - panelWidth - gap
+  left = Math.max(8, left)
+  const top = Math.max(8, Math.min(ovRect.top, window.innerHeight - 360))
+  panel.style.left = `${Math.round(left)}px`
+  panel.style.top = `${Math.round(top)}px`
+}
+
+function hideSidePanel() {
+  $$(SIDE_PANEL_ID)?.remove()
 }
 
 // ─── Inline edit ────────────────────────────────────────────────────
@@ -792,6 +1014,16 @@ function lockElement(el: Element) {
   lockedElement = el
   el.classList.add(LOCKED_CLASS)
   lastHighlighted = null
+  // Push to inspection history (Feature 4)
+  const _hsnap = {
+    tag: el.tagName.toLowerCase(),
+    selector: (el.id ? '#'+el.id : el.tagName.toLowerCase() + ((el as HTMLElement).className ? '.'+String((el as HTMLElement).className).split(' ').filter(c=>c&&!c.startsWith('stylesnap-')).slice(0,2).join('.') : '')),
+    snippet: (el as HTMLElement).outerHTML.slice(0, 80),
+    parsedCSS: _lastParsedCSS,
+    timestamp: Date.now(),
+  }
+  _history.unshift(_hsnap)
+  if (_history.length > 10) _history.pop()
   // Stop auto-tracking — locked overlay stays fixed
   if (_overlayCleanup) { _overlayCleanup(); _overlayCleanup = null }
   const overlay = $$(OVERLAY_ID)
@@ -1069,34 +1301,31 @@ function getComponentCSS(el: Element): ComponentCSS {
 
 // ─── Copy CSS ─────────────────────────────────────────────────────────
 
-function copyCurrentCSS(el: Element) {
-  // Read copy format preference
-  chrome.storage.local.get(['stylesnap_settings'], (res) => {
-    const settings = res.stylesnap_settings || {}
-    const copyFormat = settings.copyFormat || 'css'
-
-    if (copyFormat === 'tailwind') {
-      const twClasses = getTailwindClasses(el)
-      navigator.clipboard.writeText(`class="${twClasses}"`).then(() => showToast('Tailwind copied!'))
-        .catch(() => showToast('Copy failed'))
-      return
-    }
-
-    // Use computed styles from _lastParsedCSS (resolves var() references)
-    // instead of raw stylesheet rules which leave custom properties unresolved
-    if (_lastParsedCSS && _lastParsedCSS.styles && Object.keys(_lastParsedCSS.styles).length > 0) {
-      const output = formatCSS(_lastParsedCSS.styles, _lastParsedCSS.selector)
-      navigator.clipboard.writeText(output).then(() => showToast('CSS copied!'))
-        .catch(() => showToast('Copy failed'))
-    } else {
-      showToast('No CSS to copy — hover an element first')
-    }
-  })
+function copyCurrentCSS(_el: Element) {
+  if (_lastParsedCSS && _lastParsedCSS.styles && Object.keys(_lastParsedCSS.styles).length > 0) {
+    const output = formatCSS(_lastParsedCSS.styles, _lastParsedCSS.selector)
+    navigator.clipboard.writeText(output).then(() => showToast('CSS copied!'))
+      .catch(() => showToast('Copy failed'))
+  } else {
+    showToast('No CSS to copy — hover an element first')
+  }
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────
 
+// rAF-throttled mousemove: coalesce bursts into one handler call per frame.
+let _mmRaf = 0
+let _mmEvent: MouseEvent | null = null
 function onMouseMove(e: MouseEvent) {
+  _mmEvent = e
+  if (_mmRaf) return
+  _mmRaf = requestAnimationFrame(() => {
+    _mmRaf = 0
+    if (_mmEvent) handleMouseMove(_mmEvent)
+  })
+}
+
+function handleMouseMove(e: MouseEvent) {
   if (!isActive()) return
   const el = document.elementFromPoint(e.clientX, e.clientY)
 
@@ -1136,7 +1365,8 @@ function onMouseMove(e: MouseEvent) {
   highlightElement(el)
   const parsedCSS = parseElement(el)
   showOverlay(el, parsedCSS)
-  updateGuides(el.getBoundingClientRect())
+  const rect = el.getBoundingClientRect()
+  updateGuides(rect)
 
   chrome.runtime.sendMessage({
     type: 'ELEMENT_HOVERED',
@@ -1145,7 +1375,7 @@ function onMouseMove(e: MouseEvent) {
       tagName: el.tagName.toLowerCase(),
       id: el.id,
       classList: Array.from(el.classList).filter(c => !c.startsWith('stylesnap-')),
-      rect: { width: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), top: Math.round(el.getBoundingClientRect().top), left: Math.round(el.getBoundingClientRect().left) },
+      rect: { width: Math.round(rect.width), height: Math.round(rect.height), top: Math.round(rect.top), left: Math.round(rect.left) },
     },
   }).catch(() => {})
 }
@@ -1301,15 +1531,19 @@ function onKeyDown(e: KeyboardEvent) {
         // Navigate from locked element → lock on new element
         unlockElement()
         lockElement(target)
+        // Don't call highlightElement — locked visual is sufficient,
+        // and adding HIGHLIGHT_CLASS on top of LOCKED_CLASS causes it to
+        // never be cleaned up (removeHighlight skips when lastHighlighted===lockedElement)
       } else {
         // Navigate from hovered element → hover new element
         removeHighlight()
         lastHighlighted = target
+        highlightElement(target)
       }
 
-      highlightElement(target)
       showOverlay(target, parsedCSS)
-      showToast(`${tag(target)} ${(target as HTMLElement).id ? '#' + (target as HTMLElement).id : (target as HTMLElement).className ? '.' + (target as HTMLElement).className.split(' ').filter(c => !c.startsWith('stylesnap-')).slice(0,2).join('.') : ''}`)
+      updateGuides((target as HTMLElement).getBoundingClientRect())
+      showToast(`${tag(target)} ${(target as HTMLElement).id ? '#' + (target as HTMLElement).id : classNameOf(target) ? '.' + classNameOf(target).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0,2).join('.') : ''}`)
     }
   }
 }
@@ -1345,8 +1579,9 @@ function showHintBar() {
     <span class="ss-hint-item"><kbd>ESC</kbd> Exit</span>
     <span class="ss-hint-sep">·</span>
     <span class="ss-hint-item"><kbd>?</kbd> All</span>
-    <button class="ss-hint-action" title="Extract page colors & design tokens">🎨 Palette</button>
-    <button class="ss-hint-settings" title="Settings"><svg ${SVG}><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>
+    <button class="ss-hint-action ss-hint-design" title="Colors & Fonts">Design</button>
+    <button class="ss-hint-action ss-hint-history" title="Inspection history">History</button>
+    <button class="ss-hint-settings" title="Settings"><svg ${SVG}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="ss-hint-close" title="Dismiss">&times;</button>
   `
   Object.assign(bar.style, {
@@ -1388,10 +1623,33 @@ function showHintBar() {
     showSettingsPopup()
   })
 
-  const paletteBtn = bar.querySelector('.ss-hint-action')!
-  paletteBtn.addEventListener('click', (e) => {
+  const designBtn = bar.querySelector('.ss-hint-design')
+  designBtn?.addEventListener('click', (e) => {
     e.stopPropagation()
-    showPalettePopup()
+    showDesignPopup()
+  })
+
+  const historyBtn = bar.querySelector('.ss-hint-history')
+  historyBtn?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    showHistoryPanel()
+  })
+
+  // Async quota warning for free users
+  getLicenseStatus().then(status => {
+    if (status.isPro) return
+    const used = status.dailyUsed
+    const limit = status.dailyLimit
+    const pct = used / limit
+    if (pct < 0.5) return
+    const remaining = limit - used
+    const color = pct >= 0.9 ? '#f87171' : '#fbbf24'
+    const quotaSpan = document.createElement('span')
+    quotaSpan.style.cssText = `margin-left:6px;font-size:10px;color:${color};border:1px solid ${color}33;border-radius:3px;padding:1px 6px;cursor:pointer;`
+    quotaSpan.textContent = remaining <= 0 ? '0 left · Upgrade →' : `${remaining}/${limit} left`
+    quotaSpan.title = 'Upgrade to Pro for unlimited extractions'
+    quotaSpan.addEventListener('click', (e) => { e.stopPropagation(); showUpgradeModal() })
+    bar.insertBefore(quotaSpan, bar.querySelector('.ss-hint-action'))
   })
 
   // Fade in
@@ -1414,10 +1672,6 @@ function hideHintBar() {
 let toastTimeout: number | null = null
 function showToast(message: string) {
   showToastImpl(message, 2000)
-}
-
-function showPersistentToast(message: string) {
-  showToastImpl(message, 0) // 0 = never auto-dismiss
 }
 
 function showToastImpl(message: string, duration: number) {
@@ -1494,43 +1748,246 @@ function toggleShortcutsPanel() {
 
   stAppend(panel)
 
-  const closeBtn = panel.querySelector('#ss-shortcuts-close')
-  const close = () => panel.remove()
-  closeBtn?.addEventListener('click', close)
-  // Click outside to close
-  setTimeout(() => {
-    const clickOutside = (ev: MouseEvent) => {
-      if (!panel.contains(ev.target as Node)) { close(); document.removeEventListener('click', clickOutside) }
-    }
-    document.addEventListener('click', clickOutside)
-  }, 100)
+  const close = attachOutsideClose(panel)
+  panel.querySelector('#ss-shortcuts-close')?.addEventListener('click', () => close())
 }
 
 // ─── Color Palette Popup ──────────────────────────────────────────────
 
-function rgbFromValue(v: string): [number, number, number] | null {
-  // hex: #abc → #aabbcc
-  let h = v.replace(/^#/, '')
-  if (h.length === 3) h = h.split('').map(c => c + c).join('')
-  const hm = h.match(/^([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i)
-  if (hm) return [parseInt(hm[1], 16), parseInt(hm[2], 16), parseInt(hm[3], 16)]
-  // rgb / rgba
-  const rm = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
-  if (rm) return [parseInt(rm[1]), parseInt(rm[2]), parseInt(rm[3])]
-  return null
+// ─── Design Popup (Colors + Fonts tabs) ─────────────────────────────
+/** Close all hint-bar popups except the one with the given id */
+function closeHintPopups(exceptId?: string) {
+  ['stylesnap-design-popup', 'stylesnap-history-popup', 'stylesnap-settings-popup'].forEach(id => {
+    if (id !== exceptId) $$(id)?.remove()
+  })
 }
 
-function showPalettePopup() {
-  // Close other popups first
-  const settingsPopup = document.getElementById('stylesnap-settings-popup')
-  if (settingsPopup) settingsPopup.remove()
-
-  // Remove any existing palette popup (toggle)
-  const existing = document.getElementById('stylesnap-palette-popup')
+function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
+  // Toggle: if already open, close it
+  const existing = $$('stylesnap-design-popup')
   if (existing) { existing.remove(); return }
+  // Close other hint popups (mutually exclusive)
+  closeHintPopups('stylesnap-design-popup')
 
   const popup = document.createElement('div')
-  popup.id = 'stylesnap-palette-popup'
+  popup.id = 'stylesnap-design-popup'
+  popup.setAttribute('data-stylesnap', 'true')
+  Object.assign(popup.style, {
+    position: 'fixed',
+    zIndex: '999994',
+    background: 'rgba(15, 23, 42, 0.97)',
+    border: '1px solid rgba(99, 102, 241, 0.3)',
+    borderRadius: '10px',
+    width: '300px',
+    maxHeight: '480px',
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+    fontFamily: 'system-ui, sans-serif',
+    color: '#e2e8f0',
+    fontSize: '12px',
+  })
+
+  const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.06);border-radius:6px;padding:2px;'
+  const tabBtn = (tab: string, label: string, active: boolean) =>
+    `<button class="ss-dpop-tab" data-tab="${tab}" style="background:${active ? 'rgba(99,102,241,0.25)' : 'none'};border:none;color:${active ? '#e2e8f0' : '#64748b'};padding:4px 12px;border-radius:4px;font-size:11px;cursor:pointer;font-family:system-ui,sans-serif;">${label}</button>`
+
+  popup.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div style="${chipGroupStyle}">
+        ${tabBtn('colors', 'Colors', initialTab === 'colors')}
+        ${tabBtn('fonts', 'Fonts', initialTab === 'fonts')}
+      </div>
+      <button id="ss-design-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
+    </div>
+    <div id="ss-dpop-colors" style="display:${initialTab === 'colors' ? 'flex' : 'none'};flex-direction:column;flex:1;min-height:0;">
+      <div style="flex:1;overflow-y:auto;padding:10px 12px 6px;" class="ss-hint-scroll">
+        <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Extracting colors…</div>
+      </div>
+      <div id="ss-dpop-color-actions" style="display:none;flex-shrink:0;padding:8px 12px;border-top:1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex;gap:6px;">
+          <button id="ss-pal-copy-vars" style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy CSS Vars</button>
+          <button id="ss-pal-copy-json" style="flex:1;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy JSON</button>
+        </div>
+      </div>
+    </div>
+    <div id="ss-dpop-fonts" style="display:${initialTab === 'fonts' ? 'flex' : 'none'};flex-direction:column;flex:1;min-height:0;">
+      <div style="flex:1;overflow-y:auto;padding:10px 12px;" class="ss-hint-scroll">
+        <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Scanning fonts…</div>
+      </div>
+    </div>
+  `
+  stAppend(popup)
+
+  // Position: centered below hint bar
+  const hint = $$('stylesnap-hint-bar')
+  const pw = 300
+  if (hint) {
+    const hRect = hint.getBoundingClientRect()
+    const left = Math.max(8, Math.min(hRect.left + hRect.width / 2 - pw / 2, window.innerWidth - pw - 8))
+    popup.style.top = `${hRect.bottom + 6}px`
+    popup.style.left = `${Math.round(left)}px`
+  } else {
+    popup.style.top = '60px'
+    popup.style.left = `${Math.round(window.innerWidth / 2 - pw / 2)}px`
+  }
+
+  popup.querySelector('#ss-design-close')?.addEventListener('click', () => popup.remove())
+
+  // Tab switching — stopPropagation to prevent triggering closeOnOutside
+  popup.querySelectorAll('.ss-dpop-tab').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      const tab = (btn as HTMLElement).dataset.tab as 'colors' | 'fonts'
+      popup.querySelectorAll('.ss-dpop-tab').forEach(b => {
+        ;(b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
+        ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#64748b'
+      })
+      ;(popup.querySelector('#ss-dpop-colors') as HTMLElement).style.display = tab === 'colors' ? 'flex' : 'none'
+      ;(popup.querySelector('#ss-dpop-fonts') as HTMLElement).style.display = tab === 'fonts' ? 'flex' : 'none'
+    })
+  })
+
+  // Click outside to close — leak-proof, auto-cleans on any removal path
+  attachOutsideClose(popup, { delay: 300 })
+
+  // ── Colors tab ──────────────────────────────────────────────────────
+  setTimeout(() => {
+    try {
+      // Collect colors directly via getComputedStyle — more reliable than extractDesignTokens
+      const colorMap = new Map<string, string>() // hex → original rgb string
+      const colorProps = ['color','background-color','border-top-color','border-bottom-color','border-left-color','border-right-color','outline-color','fill','stroke']
+      document.querySelectorAll('*').forEach(node => {
+        if ((node as HTMLElement).dataset?.stylesnap) return
+        if ((node as Element).id?.startsWith('stylesnap-')) return
+        const cs = window.getComputedStyle(node as HTMLElement)
+        colorProps.forEach(p => {
+          const v = cs.getPropertyValue(p)
+          if (!v || v === 'rgba(0, 0, 0, 0)' || v === 'transparent') return
+          const m = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+          if (!m) return
+          const hex = '#' + [m[1],m[2],m[3]].map(x => parseInt(x).toString(16).padStart(2,'0')).join('')
+          if (!colorMap.has(hex)) colorMap.set(hex, v)
+        })
+      })
+      // Build simple color list
+      const colors = Array.from(colorMap.entries()).map(([hex, rgb]) => ({
+        value: hex, role: 'other' as const, rgb
+      }))
+      const colorsPanel = popup.querySelector('#ss-dpop-colors') as HTMLElement
+
+      const scrollEl = colorsPanel.querySelector('.ss-hint-scroll') as HTMLElement
+      const actionsEl = popup.querySelector('#ss-dpop-color-actions') as HTMLElement
+      if (colors.length === 0) {
+        scrollEl.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No colors found</div>`
+      } else {
+        let paletteFmt = 'hex'
+        const hexToRgb = (hex: string) => {
+          const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
+          return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] as [number,number,number] : null
+        }
+        const fmtColor = (hex: string, fmt: string) => {
+          if (fmt === 'hex') return hex
+          const rgb = hexToRgb(hex)
+          if (!rgb) return hex
+          const [r,g,b] = rgb
+          if (fmt === 'rgb') return `rgb(${r}, ${g}, ${b})`
+          const rf=r/255,gf=g/255,bf=b/255,max=Math.max(rf,gf,bf),min=Math.min(rf,gf,bf),l=(max+min)/2
+          let h=0,s=0
+          if(max!==min){const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);if(max===rf)h=((gf-bf)/d+(gf<bf?6:0))/6;else if(max===gf)h=((bf-rf)/d+2)/6;else h=((rf-gf)/d+4)/6}
+          return `hsl(${Math.round(h*360)},${Math.round(s*100)}%,${Math.round(l*100)}%)`
+        }
+        const renderGrid = () => colors.map(c => {
+          const display = fmtColor(c.value, paletteFmt)
+          return `<div class="ss-design-swatch" data-hex="${c.value}" data-display="${display}" title="${display}" style="cursor:pointer;text-align:center;"><div style="width:100%;aspect-ratio:1;border-radius:6px;background:${c.value};border:1px solid rgba(255,255,255,0.1);"></div><div style="font-size:9px;color:#94a3b8;margin-top:2px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${display}</div></div>`
+        }).join('')
+
+        scrollEl.innerHTML = `
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">
+            <span style="font-size:10px;color:#64748b;">${colors.length} colors</span>
+            <div style="display:flex;gap:2px;background:rgba(255,255,255,0.05);border-radius:6px;padding:2px;margin-left:auto;">
+              ${['hex','rgb','hsl'].map(f => `<button class="ss-pal-fmt" data-fmt="${f}" style="background:${f==='hex'?'rgba(99,102,241,0.25)':'none'};color:${f==='hex'?'#e2e8f0':'#94a3b8'};border:none;border-radius:4px;padding:2px 6px;font-size:10px;font-family:monospace;cursor:pointer;">${f.toUpperCase()}</button>`).join('')}
+            </div>
+          </div>
+          <div id="ss-pal-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;">${renderGrid()}</div>
+        `
+        actionsEl.style.display = 'block'
+
+        const attachSwatchHandlers = () => {
+          scrollEl.querySelectorAll('.ss-design-swatch').forEach(sw => {
+            sw.addEventListener('click', () => {
+              const text = (sw as HTMLElement).dataset.display || (sw as HTMLElement).dataset.hex || ''
+              navigator.clipboard.writeText(text).then(() => showToast(`Copied ${text}`)).catch(() => {})
+            })
+          })
+        }
+        attachSwatchHandlers()
+        scrollEl.querySelectorAll('.ss-pal-fmt').forEach(btn => {
+          btn.addEventListener('click', () => {
+            paletteFmt = (btn as HTMLElement).dataset.fmt || 'hex'
+            scrollEl.querySelectorAll('.ss-pal-fmt').forEach(b => {
+              ;(b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
+              ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#94a3b8'
+            })
+            const grid = scrollEl.querySelector('#ss-pal-grid')
+            if (grid) { grid.innerHTML = renderGrid(); attachSwatchHandlers() }
+          })
+        })
+        popup.querySelector('#ss-pal-copy-vars')?.addEventListener('click', () => {
+          const vars = colors.map((c,i) => `  --color-${i+1}: ${c.value};`).join('\n')
+          navigator.clipboard.writeText(`:root {\n${vars}\n}`).then(() => showToast('Copied CSS variables')).catch(() => {})
+        })
+        popup.querySelector('#ss-pal-copy-json')?.addEventListener('click', () => {
+          navigator.clipboard.writeText(JSON.stringify({colors: colors.map(c => c.value)},null,2)).then(() => showToast('Copied JSON')).catch(() => {})
+        })
+      }
+    } catch { (popup.querySelector('#ss-dpop-colors .ss-hint-scroll') as HTMLElement).innerHTML = `<div style="padding:16px;text-align:center;color:#f87171;">Extraction failed</div>` }
+  }, 50)
+
+  // ── Fonts tab ───────────────────────────────────────────────────────
+  setTimeout(() => {
+    try {
+      const fontMap = new Map<string, {sizes: Set<string>, weights: Set<string>}>()
+      document.querySelectorAll('*').forEach(node => {
+        if ((node as HTMLElement).dataset?.stylesnap) return
+        if (node.id?.startsWith('stylesnap-')) return
+        const cs = window.getComputedStyle(node as HTMLElement)
+        const ff = cs.fontFamily.split(',')[0].replace(/['"]/g,'').trim()
+        if (!ff) return
+        if (!fontMap.has(ff)) fontMap.set(ff, {sizes: new Set(), weights: new Set()})
+        const entry = fontMap.get(ff)!
+        entry.sizes.add(cs.fontSize)
+        entry.weights.add(cs.fontWeight)
+      })
+      const fontsScroll = popup.querySelector('#ss-dpop-fonts .ss-hint-scroll') as HTMLElement
+      if (fontMap.size === 0) {
+        fontsScroll.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No fonts found</div>`
+        return
+      }
+      const rows = Array.from(fontMap.entries()).map(([family, data]) => {
+        const sizes = Array.from(data.sizes).sort((a,b) => parseFloat(a)-parseFloat(b)).slice(0,6).join(', ')
+        const weights = Array.from(data.weights).sort((a,b) => +a - +b).join(', ')
+        return `<div style="margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-weight:600;font-size:12px;color:#e2e8f0;margin-bottom:4px;">${family}</div>
+          <div style="font-size:10px;color:#94a3b8;">Sizes: ${sizes}</div>
+          <div style="font-size:10px;color:#94a3b8;">Weights: ${weights}</div>
+          <div style="margin-top:4px;font-family:${family};font-size:13px;color:#cbd5e1;">The quick brown fox</div>
+        </div>`
+      }).join('')
+      fontsScroll.innerHTML = `<div style="font-size:10px;color:#64748b;margin-bottom:8px;">${fontMap.size} font families</div>${rows}`
+    } catch { /* noop */ }
+  }, 80)
+}
+
+
+// ─── History Panel (Feature 4) ────────────────────────────────────────
+function showHistoryPanel() {
+  const existing = $$('stylesnap-history-popup')
+  if (existing) { existing.remove(); return }
+  closeHintPopups('stylesnap-history-popup')
+
+  const popup = document.createElement('div')
+  popup.id = 'stylesnap-history-popup'
   popup.setAttribute('data-stylesnap', 'true')
   Object.assign(popup.style, {
     position: 'fixed',
@@ -1539,15 +1996,14 @@ function showPalettePopup() {
     border: '1px solid rgba(99, 102, 241, 0.3)',
     borderRadius: '10px',
     padding: '12px',
-    minWidth: '220px',
-    maxWidth: '260px',
+    width: '260px',
+    maxHeight: '380px',
+    overflowY: 'auto',
     boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     fontFamily: 'system-ui, sans-serif',
     color: '#e2e8f0',
     fontSize: '12px',
   })
-
-  // Position: prefer below hint bar if visible, else near floating button
   const hint = $$('stylesnap-hint-bar')
   if (hint && window.getComputedStyle(hint).opacity !== '0') {
     const hRect = hint.getBoundingClientRect()
@@ -1555,154 +2011,67 @@ function showPalettePopup() {
     popup.style.left = '50%'
     popup.style.transform = 'translateX(-50%)'
   } else {
-    const fb = document.getElementById('stylesnap-floating-btn')
-    if (fb) {
-      const fbRect = fb.getBoundingClientRect()
-      const popupH = popup.getBoundingClientRect().height || 200
-      if (fbRect.top - popupH - 8 > 0) {
-        popup.style.top = `${fbRect.top - 8}px`
-        popup.style.transform = 'translateY(-100%)'
-      } else {
-        popup.style.top = `${fbRect.bottom + 8}px`
-        popup.style.transform = 'none'
-      }
-      const popupTop = popup.getBoundingClientRect().top
-      if (popupTop < 8) {
-        popup.style.top = '8px'
-        popup.style.transform = 'none'
-      }
-      popup.style.right = `${Math.max(8, window.innerWidth - fbRect.right - 8)}px`
-    } else {
-      popup.style.bottom = '100px'
-      popup.style.right = '24px'
-    }
+    popup.style.top = '60px'
+    popup.style.right = '24px'
   }
 
-  // Loading state
-  popup.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;">Extracting colors...</div>`
+  const timeAgo = (ts: number) => {
+    const s = Math.round((Date.now() - ts) / 1000)
+    if (s < 60) return `${s}s ago`
+    const m = Math.round(s / 60)
+    if (m < 60) return `${m}m ago`
+    return `${Math.round(m/60)}h ago`
+  }
+
+  const renderItems = () => {
+    if (_history.length === 0) return `<div style="padding:16px;text-align:center;color:#94a3b8;">No history yet — lock elements with click</div>`
+    return _history.map((item, i) => `
+      <div class="ss-history-item" data-idx="${i}" style="margin-bottom:6px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);cursor:pointer;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:600;font-size:11px;color:#a5b4fc;">&lt;${item.tag}&gt;</span>
+          <span style="font-size:10px;color:#64748b;">${timeAgo(item.timestamp)}</span>
+        </div>
+        <div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.selector}</div>
+        <div style="font-size:9px;color:#475569;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;">${item.snippet.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+      </div>`).join('')
+  }
+
+  popup.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span style="font-weight:600;font-size:13px;">History</span>
+      <span style="font-size:11px;color:#64748b;">${_history.length} items</span>
+      <button id="ss-history-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
+    </div>
+    <div id="ss-history-list">${renderItems()}</div>
+  `
   stAppend(popup)
 
-  // Extract tokens (async via setTimeout to let UI update)
-  setTimeout(() => {
-    try {
-      const tokens = extractDesignTokens()
-      const colors = tokens.colors || []
+  popup.querySelector('#ss-history-close')?.addEventListener('click', () => popup.remove())
 
-      if (colors.length === 0) {
-        popup.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;">No colors found</div>`
-        return
+  popup.querySelectorAll('.ss-history-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const idx = parseInt((item as HTMLElement).dataset.idx || '0')
+      const snap = _history[idx]
+      if (!snap) return
+      popup.remove()
+      // Try to find the element on the current page
+      let target: Element | null = null
+      try { target = document.querySelector(snap.selector) } catch (_) {}
+      if (target && document.body.contains(target)) {
+        // Element still exists — lock and show overlay
+        unlockElement()
+        lockElement(target as Element)
+        const parsedCSS = parseElement(target)
+        _lastParsedCSS = parsedCSS
+        showOverlay(target, parsedCSS)
+        showToast(`Re-locked <${snap.tag}>`)
+      } else {
+        showToast('Element no longer on this page — inspect a similar element')
       }
+    })
+  })
 
-      const roleLabel: Record<string, string> = {
-        primary: 'Primary', secondary: 'Secondary', accent: 'Accent',
-        background: 'BG', text: 'Text', neutral: 'Neutral', other: 'Other'
-      }
-
-      // Parse all colors into [r,g,b] components for format conversion
-      const parsed = colors.map(c => {
-        const r = rgbFromValue(c.value)
-        return r ? { ...c, r: r[0], g: r[1], b: r[2] } : c
-      })
-
-      const fmtColor = (r: number, g: number, b: number, fmt: string) => {
-        if (fmt === 'hex') return '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('')
-        if (fmt === 'rgb') return `rgb(${r}, ${g}, ${b})`
-        // HSL
-        const rf = r/255, gf = g/255, bf = b/255
-        const max = Math.max(rf,gf,bf), min = Math.min(rf,gf,bf)
-        const l = (max+min)/2
-        let h = 0, s = 0
-        if (max !== min) {
-          const d = max-min
-          s = l > 0.5 ? d/(2-max-min) : d/(max+min)
-          if (max === rf) h = ((gf-bf)/d+(gf<bf?6:0))/6
-          else if (max === gf) h = ((bf-rf)/d+2)/6
-          else h = ((rf-gf)/d+4)/6
-        }
-        return `hsl(${Math.round(h*360)}, ${Math.round(s*100)}%, ${Math.round(l*100)}%)`
-      }
-
-      // ── Render palette grid ──
-      let paletteFmt = 'hex'
-      const renderGrid = () => {
-        return parsed.map(c => {
-          if ('r' in c) {
-            const hex = fmtColor(c.r, c.g, c.b, 'hex')
-            const display = fmtColor(c.r, c.g, c.b, paletteFmt)
-            const bg = `rgb(${c.r},${c.g},${c.b})`
-            return `<div class="ss-palette-swatch" data-hex="${hex}" data-display="${display}" title="${display} · ${roleLabel[c.role] || c.role}" style="cursor:pointer;text-align:center;"><div style="width:100%;aspect-ratio:1;border-radius:6px;background:${bg};border:1px solid rgba(255,255,255,0.1);"></div><div class="ss-palette-color-label" style="font-size:9px;color:#94a3b8;margin-top:2px;font-family:monospace;">${display}</div><div style="font-size:8px;color:#64748b;">${roleLabel[c.role] || c.role}</div></div>`
-          }
-          return `<div class="ss-palette-swatch" data-hex="${c.value}" title="${c.value} · ${roleLabel[c.role] || c.role}" style="cursor:pointer;text-align:center;"><div style="width:100%;aspect-ratio:1;border-radius:6px;background:${c.value};border:1px solid rgba(255,255,255,0.1);"></div><div style="font-size:9px;color:#94a3b8;margin-top:2px;font-family:monospace;">${c.value}</div><div style="font-size:8px;color:#64748b;">${roleLabel[c.role] || c.role}</div></div>`
-        }).join('')
-      }
-
-      popup.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <span style="font-weight:600;font-size:13px;">Palette</span>
-          <span style="font-size:11px;color:#64748b;">${colors.length} colors</span>
-          <div style="display:flex;gap:2px;background:rgba(255,255,255,0.05);border-radius:6px;padding:2px;">
-            <button class="ss-palette-fmt-btn" data-fmt="hex" style="background:rgba(99,102,241,0.25);color:#e2e8f0;border:none;border-radius:4px;padding:2px 6px;font-size:10px;font-family:monospace;cursor:pointer;">HEX</button>
-            <button class="ss-palette-fmt-btn" data-fmt="rgb" style="background:none;color:#94a3b8;border:none;border-radius:4px;padding:2px 6px;font-size:10px;font-family:monospace;cursor:pointer;">RGB</button>
-            <button class="ss-palette-fmt-btn" data-fmt="hsl" style="background:none;color:#94a3b8;border:none;border-radius:4px;padding:2px 6px;font-size:10px;font-family:monospace;cursor:pointer;">HSL</button>
-          </div>
-          <button id="ss-palette-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
-        </div>
-        <div id="ss-palette-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(48px,1fr));gap:6px;">
-          ${renderGrid()}
-        </div>
-      `
-
-      // Close button
-      popup.querySelector('#ss-palette-close')?.addEventListener('click', () => popup.remove())
-
-      // Format toggle buttons
-      popup.querySelectorAll('.ss-palette-fmt-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          paletteFmt = (btn as HTMLElement).dataset.fmt || 'hex'
-          // Update active state
-          popup.querySelectorAll('.ss-palette-fmt-btn').forEach(b => {
-            (b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
-            ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#94a3b8'
-          })
-          // Re-render grid
-          const grid = popup.querySelector('#ss-palette-grid')
-          if (grid) grid.innerHTML = renderGrid()
-          // Re-attach click-to-copy handlers
-          popup.querySelectorAll('.ss-palette-swatch').forEach(sw => {
-            sw.addEventListener('click', () => {
-              const text = (sw as HTMLElement).dataset.display || (sw as HTMLElement).dataset.hex || ''
-              navigator.clipboard.writeText(text).then(() => {
-                showToast(`Copied ${text}`)
-              }).catch(() => {})
-            })
-          })
-        })
-      })
-
-      // Click to copy
-      popup.querySelectorAll('.ss-palette-swatch').forEach(sw => {
-        sw.addEventListener('click', () => {
-          const hex = (sw as HTMLElement).dataset.hex || ''
-          navigator.clipboard.writeText(hex).then(() => {
-            showToast(`Copied ${hex}`)
-          }).catch(() => { /* noop */ })
-        })
-      })
-    } catch {
-      popup.innerHTML = `<div style="padding:16px;text-align:center;color:#f87171;">Extraction failed</div>`
-    }
-  }, 50)
-
-  // Click outside to close
-  setTimeout(() => {
-    const closeOnOutside = (ev: MouseEvent) => {
-      if (!popup.contains(ev.target as Node)) {
-        popup.remove()
-        document.removeEventListener('click', closeOnOutside)
-      }
-    }
-    document.addEventListener('click', closeOnOutside)
-  }, 200)
+  attachOutsideClose(popup, { delay: 200 })
 }
 
 // ─── Export Dropdown Menu ─────────────────────────────────────────────
@@ -1988,92 +2357,6 @@ function mapCSSToTailwind(styles: CSSStyleDeclaration): string[] {
   return classes
 }
 
-function showExportMenu(anchor: HTMLElement) {
-  const existing = $$('stylesnap-export-menu')
-  if (existing) { existing.remove(); return }
-
-  const el = lockedElement as HTMLElement
-  if (!el) { showToast('Lock an element first'); return }
-
-  const menu = document.createElement('div')
-  menu.id = 'stylesnap-export-menu'
-  menu.setAttribute('data-stylesnap', 'true')
-  Object.assign(menu.style, {
-    position: 'fixed',
-    zIndex: '9999999',
-    background: 'rgba(15, 23, 42, 0.98)',
-    border: '1px solid rgba(99, 102, 241, 0.25)',
-    borderRadius: '6px',
-    padding: '4px',
-    minWidth: '170px',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-    fontFamily: 'system-ui, sans-serif',
-    fontSize: '12px',
-  })
-
-  const itemStyle = 'display:flex;align-items:center;gap:6px;width:100%;background:none;border:none;border-radius:4px;color:#e2e8f0;padding:7px 10px;cursor:pointer;text-align:left;font-size:12px;transition:background 0.1s;font-family:system-ui,sans-serif;'
-  const svg14 = `${SVG} width="14" height="14"`
-
-  menu.innerHTML = `
-    <button class="ss-export-menu-item" style="${itemStyle}color:#34d399;">
-      <svg ${svg14} stroke="#34d399" fill="none"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
-      CSS on CodePen
-    </button>
-    <button class="ss-export-menu-item" style="${itemStyle}color:#38bdf8;">
-      <svg ${svg14} stroke="#38bdf8"><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/><path d="M17.4 9.4A2 2 0 1 1 19 13h-7"/></svg>
-      Tailwind on CodePen
-    </button>
-    <button class="ss-export-menu-item" style="${itemStyle}color:#818cf8;">
-      <svg ${svg14} stroke="#818cf8"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-      React on CodePen
-    </button>
-    <button class="ss-export-menu-item" style="${itemStyle}color:#a78bfa;">
-      <svg ${svg14} stroke="#a78bfa"><path d="M12 2a10 10 0 0 0-3.5 19.5"/><path d="M12 2a10 10 0 0 1 3.5 19.5"/><polyline points="2 12 12 18 22 12"/></svg>
-      Vue on CodePen
-    </button>
-  `
-
-  stAppend(menu)
-
-  // Position menu below anchor (with naive fallback; anchor is the Export button in overlay)
-  const anchorRect = anchor.getBoundingClientRect()
-  const menuHeight = menu.getBoundingClientRect().height
-  const spaceBelow = window.innerHeight - anchorRect.bottom
-  let top = spaceBelow >= menuHeight + 4 ? anchorRect.bottom + 4 : anchorRect.top - menuHeight - 4
-  top = Math.max(4, Math.min(top, window.innerHeight - menuHeight - 4))
-  Object.assign(menu.style, {
-    position: 'fixed',
-    left: `${Math.max(4, anchorRect.right - 170)}px`,
-    top: `${top}px`,
-  })
-
-  const items = menu.querySelectorAll('.ss-export-menu-item')
-
-  // CSS → CodePen
-  items[0]?.addEventListener('click', () => { menu.remove(); exportCSSToCodePen() })
-  // Tailwind → CodePen
-  items[1]?.addEventListener('click', () => { menu.remove(); exportTailwindToCodePen() })
-  // React → CodePen
-  items[2]?.addEventListener('click', () => { menu.remove(); exportReactToCodePen() })
-  // Vue → CodePen
-  items[3]?.addEventListener('click', () => { menu.remove(); exportVueToCodePen() })
-
-  items.forEach(item => {
-    item.addEventListener('mouseenter', () => { (item as HTMLElement).style.background = 'rgba(99,102,241,0.15)' })
-    item.addEventListener('mouseleave', () => { (item as HTMLElement).style.background = 'none' })
-  })
-
-  setTimeout(() => {
-    const closeOnOutside = (ev: MouseEvent) => {
-      if (!menu.contains(ev.target as Node) && ev.target !== anchor) {
-        menu.remove()
-        document.removeEventListener('click', closeOnOutside)
-      }
-    }
-    document.addEventListener('click', closeOnOutside)
-  }, 50)
-}
-
 // ─── CodePen Export Helpers ─────────────────────────────────────────
 
 function getComponentCSSForExport(el: Element): string {
@@ -2233,12 +2516,11 @@ function getComponentCSSForExport(el: Element): string {
       Object.assign(mainProps, resolveProps(el, rules.get(sel)!))
     }
     // Use the most specific selector for the element
-    const htmlEl = el as HTMLElement
     const bestSelector = elSelectors.length > 0
       ? elSelectors.reduce((a, b) => a.length > b.length ? a : b)
       : el.id ? `#${el.id}`
-      : htmlEl.className && htmlEl.className.replace(/stylesnap-\S*/g, '').trim()
-        ? `.${htmlEl.className.split(/\s+/).filter(c => !c.startsWith('stylesnap-')).slice(0, 3).join('.')}`
+      : classNameOf(el).replace(/stylesnap-\S*/g, '').trim()
+        ? `.${classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0, 3).join('.')}`
         : el.tagName.toLowerCase()
     const mainLines = Object.entries(mainProps).map(([k, v]) => `  ${k}: ${v};`)
     cssLines.push(`${bestSelector} {\n${mainLines.join('\n')}\n}`)
@@ -2309,81 +2591,6 @@ function exportCSSToCodePen() {
   })
 }
 
-function exportTailwindToCodePen() {
-  const el = lockedElement as HTMLElement
-  if (!el) return
-  const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
-  const twClasses = getTailwindClasses(el)
-  const componentHTML = extractComponentHTML(el, 2)
-  // Put the actual HTML inside the div — don't escape for CodePen
-  submitCodePen({
-    title: `StyleSnap — ${title} (Tailwind)`,
-    html: `<script src="https://cdn.tailwindcss.com"><\/script>\n<div class="${twClasses}">\n  ${componentHTML.split('\n').join('\n  ')}\n</div>`,
-    css: `/* ${twClasses.split(' ').length} Tailwind classes matched */`,
-    editors: '110',
-  })
-}
-
-function exportReactToCodePen() {
-  const el = lockedElement as HTMLElement
-  if (!el) return
-  const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
-  const twClasses = getTailwindClasses(el)
-  const componentHTML = extractComponentHTML(el, 2)
-  const cssStr = getComponentCSSForExport(el)
-
-  // Convert HTML to JSX (simple: class= → className=)
-  const jsxHTML = componentHTML
-    .replace(/class=/g, 'className=')
-    .replace(/for=/g, 'htmlFor=')
-    .replace(/tabindex=/g, 'tabIndex=')
-
-  submitCodePen({
-    title: `StyleSnap — ${title} (React)`,
-    html: '<div id="root"></div>',
-    css: cssStr ? `/* Additional CSS */\n${cssStr}` : '',
-    js: `const { createRoot } = ReactDOM
-
-function App() {
-  return (
-    <div className="${twClasses}">
-      ${jsxHTML.split('\n').join('\n      ')}
-    </div>
-  )
-}
-
-createRoot(document.getElementById('root')).render(<App />)`,
-    js_external: 'https://unpkg.com/react@18/umd/react.production.min.js,https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
-    js_pre_processor: 'babel',
-    editors: '101',
-  })
-}
-
-function exportVueToCodePen() {
-  const el = lockedElement as HTMLElement
-  if (!el) return
-  const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
-  const twClasses = getTailwindClasses(el)
-  const componentHTML = extractComponentHTML(el, 2)
-  const cssStr = getComponentCSSForExport(el)
-  submitCodePen({
-    title: `StyleSnap — ${title} (Vue)`,
-    html: '<div id="app"></div>',
-    css: cssStr ? `/* Additional CSS */\n${cssStr}` : '',
-    js: `const { createApp } = Vue
-
-const App = {
-  template: \`<div class="${twClasses}">
-    ${componentHTML.split('\n').join('\n    ')}
-  </div>\`
-}
-
-createApp(App).mount('#app')`,
-    js_external: 'https://unpkg.com/vue@3/dist/vue.global.prod.js',
-    editors: '111',
-  })
-}
-
 /**
  * Check if any node in the component tree matches a CSS selector
  */
@@ -2432,9 +2639,7 @@ function extractARIA(el: Element, depth = 0): string {
   const ariaAttrs = el.getAttributeNames().filter(a => a.startsWith('aria-') || a === 'role')
   const tag = el.tagName.toLowerCase()
   const id = el.id ? `#${el.id}` : ''
-  const classes = (el as HTMLElement).className && typeof (el as HTMLElement).className === 'string'
-    ? (el as HTMLElement).className.split(' ').filter(c => c && !c.startsWith('stylesnap-')).join('.')
-    : ''
+  const classes = classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).join('.')
   const sel = id || (classes ? `${tag}.${classes}` : tag)
 
   if (ariaAttrs.length > 0) {
@@ -2453,9 +2658,7 @@ function extractDOMSummary(el: Element, depth = 0): string {
   if (depth > 6) return ''
   const tag = el.tagName.toLowerCase()
   const id = el.id ? ` id="${el.id}"` : ''
-  const cls = (el as HTMLElement).className && typeof (el as HTMLElement).className === 'string'
-    ? (el as HTMLElement).className.replace(/stylesnap-\S+/g, '').trim()
-    : ''
+  const cls = classNameOf(el).replace(/stylesnap-\S+/g, '').trim()
   const classStr = cls ? ` class="${cls}"` : ''
   const children = Array.from(el.children).slice(0, 8)
     .map(c => extractDOMSummary(c, depth + 1))
@@ -2485,30 +2688,8 @@ function extractAnimations(el: Element): string {
   }).join('\n\n')
 }
 
-async function generateComponent() {
+function showAIPrompt() {
   if (!lockedElement) { showToast('Lock an element first'); return }
-
-  // Show persistent loading toast
-  showPersistentToast('Generating component... ⏳')
-  const dismissLoading = () => {
-    const t = document.getElementById('stylesnap-toast')
-    if (t) t.style.opacity = '0'
-  }
-
-  // Read license + AI config for routing decision
-  const stored = await new Promise<{
-    licenseKey?: string; instanceId?: string; isPro?: boolean;
-    apiKey?: string; apiEndpoint?: string; model?: string
-  }>((res) =>
-    chrome.storage.local.get(['stylesnap_license', 'stylesnap_ai_config'], (r) => {
-      const lic = r.stylesnap_license || {}
-      const ai = r.stylesnap_ai_config || {}
-      res({
-        licenseKey: lic.licenseKey || '', instanceId: lic.instanceId || '', isPro: lic.isPro || false,
-        apiKey: ai.apiKey || '', apiEndpoint: ai.apiEndpoint || '', model: ai.model || '',
-      })
-    })
-  )
 
   const el = lockedElement as HTMLElement
   el.classList.remove(LOCKED_CLASS)
@@ -2519,94 +2700,133 @@ async function generateComponent() {
   const dom = extractDOMSummary(el)
   const aria = extractARIA(el)
   const anim = extractAnimations(el)
-  const tag = el.tagName.toLowerCase()
+  const tagName = el.tagName.toLowerCase()
   const twClassStr = tw.join(' ')
+  const cssProps = _lastParsedCSS?.styles
+    ? Object.entries(_lastParsedCSS.styles).slice(0, 30).map(([k, v]) => `  ${k}: ${v};`).join('\n')
+    : ''
 
-  const prompt = `You are a frontend expert. Given an HTML element's DOM structure with ARIA annotations and its computed Tailwind CSS classes, generate a complete, production-ready React functional component using TypeScript and Tailwind CSS.
+  const elementContext = [
+    `Tag: <${tagName}>`,
+    el.id ? `ID: #${el.id}` : '',
+    twClassStr ? `Tailwind classes: ${twClassStr}` : '',
+    cssProps ? `\nKey CSS:\n${cssProps}` : '',
+    anim ? `\nAnimations:\n${anim}` : '',
+    `\nDOM structure:\n${dom || `<${tagName} />`}`,
+    aria ? `\nARIA:\n${aria}` : '',
+  ].filter(Boolean).join('\n')
 
---- ELEMENT INFO ---
-Tag: <${tag}>
-Tailwind classes: ${twClassStr || '(default browser styles)'}
-${anim ? `\nAnimations detected:\n${anim}\n` : ''}
---- DOM STRUCTURE ---
-${dom || `<${tag} />`}
-${aria ? `\n--- ARIA ANNOTATIONS ---\n${aria}\n` : ''}
---- INSTRUCTIONS ---
-1. Generate a COMPLETE React functional component (TypeScript).
-2. Use ALL the Tailwind classes exactly as provided on the root element.
-3. If ARIA annotations exist, faithfully implement the interactive behavior they describe.
-4. Include proper TypeScript types for props and state.
-5. If animations were detected, include the @keyframes and apply them.
-6. Export the component as default export.
-7. Include ONLY the component code, no package.json, no explanation.
+  const buildPrompt = (framework: 'react' | 'vue' | 'html'): string => {
+    if (framework === 'react') return `You are a frontend expert. Convert the following element into a production-ready React component using TypeScript and Tailwind CSS.
 
-Output ONLY valid TypeScript/TSX code inside a markdown code block.`
+${elementContext}
 
-  try {
-    let code = ''
-    const isPro = stored.isPro
+Requirements:
+- React functional component with TypeScript
+- Use all Tailwind classes exactly as provided
+- Preserve DOM structure and ARIA attributes for accessibility
+- Export as default
+- No explanation — output ONLY TSX code in a markdown code block`
 
-    if (isPro && stored.apiKey) {
-      // Pro with own key → call user's API directly
-      const resp = await fetch(stored.apiEndpoint || 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${stored.apiKey}` },
-        body: JSON.stringify({
-          model: stored.model || 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 2048,
-          temperature: 0.3,
-        }),
-      })
-      const data = await resp.json() as Record<string, unknown>
-      const content = (data.choices as Array<{message: {content: string}}>)?.[0]?.message?.content || ''
-      const m = content.match(/```[\w]*\n([\s\S]*?)\n```/)
-      code = m ? m[1].trim() : content.trim()
-      if (!code) { showToast('No component generated'); return }
-    } else if (isPro && !stored.apiKey) {
-      showToast('Set your API key in Settings first')
-      return
-    } else {
-      // Free user → use proxy (1 free per day)
-      const resp = await fetch('https://api.lucidlibs.dev/api/generate-component', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-extension-id': chrome.runtime.id || '',
-        },
-        body: JSON.stringify({
-          prompt,
-          element_tag: tag,
-          tailwind_classes: twClassStr,
-          license_key: stored.licenseKey,
-          instance_id: stored.instanceId,
-        }),
-      })
-      const data = await resp.json() as Record<string, unknown>
+    if (framework === 'vue') return `You are a frontend expert. Convert the following element into a Vue 3 component using Tailwind CSS.
 
-      if (!resp.ok || data.error) {
-        const msg = (data.error as string) || `Server error (${resp.status})`
-        if (resp.status === 429) showToast('Daily limit — upgrade to Pro for unlimited')
-        else showToast(msg)
-        return
-      }
+${elementContext}
 
-      code = (data.code as string) || ''
-      if (!code) { showToast('No component generated'); return }
-    }
+Requirements:
+- Vue 3 <script setup lang="ts"> syntax
+- Use all Tailwind classes exactly as provided
+- Preserve DOM structure and ARIA attributes for accessibility
+- No explanation — output ONLY Vue SFC code in a markdown code block`
 
-    showPreviewPanel({
-      code,
-      type: 'component',
-      title: `${tag}${(el as HTMLElement).id ? '#' + (el as HTMLElement).id : ''} — AI Component`,
-      previewHTML: extractPreviewHTML(el as HTMLElement),
-      previewCSS: buildPreviewCSS(el as HTMLElement),
-    })
-    dismissLoading()
-  } catch {
-    dismissLoading()
-    showToast('Generation failed — try again later')
+    return `You are a frontend expert. Convert the following element into clean semantic HTML with Tailwind CSS.
+
+${elementContext}
+
+Requirements:
+- Clean, semantic HTML5
+- Use all Tailwind classes exactly as provided
+- Preserve ARIA attributes for accessibility
+- No explanation — output ONLY HTML code in a markdown code block`
   }
+
+  $$('stylesnap-ai-prompt-panel')?.remove()
+
+  const panel = document.createElement('div')
+  panel.id = 'stylesnap-ai-prompt-panel'
+  panel.setAttribute('data-stylesnap', 'true')
+
+  let currentFw: 'react' | 'vue' | 'html' = 'react'
+
+  const SVG_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
+
+  const render = () => {
+    const tabs: Array<{id: 'react'|'vue'|'html'; label: string}> = [
+      {id: 'react', label: 'React / TSX'},
+      {id: 'vue',   label: 'Vue 3'},
+      {id: 'html',  label: 'HTML'},
+    ]
+    panel.innerHTML = `
+      <div id="ss-ai-backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999996;"></div>
+      <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(660px,92vw);max-height:82vh;background:rgba(15,23,42,0.98);border:1px solid rgba(99,102,241,0.28);border-radius:10px;display:flex;flex-direction:column;z-index:9999997;box-shadow:0 8px 48px rgba(0,0,0,0.55);font-family:system-ui,sans-serif;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.06);">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M12 3 9.2 8.5 3.3 9.6l4.2 4.3-1 6.1 5.5-2.9 5.5 2.9-1-6.1 4.2-4.3-5.9-1.1Z"/></svg>
+            <span style="font-size:13px;font-weight:600;color:#e2e8f0;">AI Prompt</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:10px;color:#475569;">Paste into Claude, ChatGPT, or Cursor</span>
+            <button id="ss-ai-close" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;padding:0 2px;line-height:1;">&times;</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;padding:10px 16px 0;">
+          ${tabs.map(t => `<button data-fw="${t.id}" style="background:${t.id===currentFw ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)'};border:1px solid ${t.id===currentFw ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'};color:${t.id===currentFw ? '#a5b4fc' : '#64748b'};border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.12s;">${t.label}</button>`).join('')}
+        </div>
+        <div style="flex:1;overflow:auto;padding:10px 16px;">
+          <textarea id="ss-ai-textarea" readonly style="width:100%;height:300px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.07);border-radius:6px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.65;padding:10px 12px;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
+        </div>
+        <div style="padding:10px 16px 14px;display:flex;align-items:center;justify-content:flex-end;border-top:1px solid rgba(255,255,255,0.06);">
+          <button id="ss-ai-copy" style="display:flex;align-items:center;gap:6px;background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.38);color:#a5b4fc;border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;transition:all 0.15s;">${SVG_COPY} Copy Prompt</button>
+        </div>
+      </div>
+    `
+    // Set textarea value directly to avoid HTML entity issues
+    const ta = panel.querySelector('#ss-ai-textarea') as HTMLTextAreaElement
+    if (ta) ta.value = buildPrompt(currentFw)
+
+    panel.querySelector('#ss-ai-close')?.addEventListener('click', () => panel.remove())
+    panel.querySelector('#ss-ai-backdrop')?.addEventListener('click', () => panel.remove())
+
+    panel.querySelectorAll('[data-fw]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentFw = (btn as HTMLElement).dataset.fw as 'react' | 'vue' | 'html'
+        render()
+      })
+    })
+
+    panel.querySelector('#ss-ai-copy')?.addEventListener('click', () => {
+      navigator.clipboard.writeText(buildPrompt(currentFw)).then(() => {
+        const btn = panel.querySelector('#ss-ai-copy') as HTMLElement | null
+        if (!btn) return
+        // Restore only the button — never rebuild the whole panel (avoids resetting
+        // the user's tab choice or resurrecting a closed panel).
+        const origHTML = btn.innerHTML, origBg = btn.style.background, origBorder = btn.style.borderColor, origColor = btn.style.color
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> Copied!`
+        btn.style.background = 'rgba(52,211,153,0.18)'
+        btn.style.borderColor = 'rgba(52,211,153,0.4)'
+        btn.style.color = '#34d399'
+        setTimeout(() => {
+          if (!btn.isConnected) return
+          btn.innerHTML = origHTML
+          btn.style.background = origBg
+          btn.style.borderColor = origBorder
+          btn.style.color = origColor
+        }, 1800)
+      }).catch(() => showToast('Copy failed'))
+    })
+  }
+
+  render()
+  stAppend(panel)
 }
 
 // ─── Preview Panel ────────────────────────────────────────────────────
@@ -2750,7 +2970,7 @@ function showPreviewPanel(opts: {
       title: title,
       css: type === 'css' ? currentCode : '',
       html: type === 'tailwind'
-        ? `<div class="${currentCode.replace(/\n/g, ' ')}">StyleSnap Export</div>\n<link href="https://cdn.jsdelivr.net/npm/tailwindcss@3/dist/tailwind.min.css" rel="stylesheet">`
+        ? `<div class="${currentCode.replace(/\n/g, ' ')}">StyleSnap Export</div>\n<script src="https://cdn.tailwindcss.com"></script>`
         : '<div>StyleSnap Export</div>',
       editors: '110',
     })
@@ -2767,10 +2987,11 @@ function showPreviewPanel(opts: {
   const closePanel = () => {
     document.removeEventListener('mousemove', onDragMove)
     document.removeEventListener('mouseup', onDragEnd)
+    document.removeEventListener('keydown', onEsc)
     panel.remove()
-    const menu = document.getElementById('stylesnap-export-menu')
-    if (menu) menu.remove()
+    $$('stylesnap-export-menu')?.remove()
   }
+  const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') closePanel() }
 
   // ─── Drag panel by header ───
   let dragInfo: { startX: number; startY: number; startLeft: number; startTop: number } | null = null
@@ -2796,9 +3017,7 @@ function showPreviewPanel(opts: {
   document.addEventListener('mouseup', onDragEnd)
 
   panel.querySelector('#ss-preview-close')?.addEventListener('click', closePanel)
-  document.addEventListener('keydown', function escClose(e: KeyboardEvent) {
-    if (e.key === 'Escape') { closePanel(); document.removeEventListener('keydown', escClose as EventListener) }
-  } as EventListener)
+  document.addEventListener('keydown', onEsc)
 }
 
 // ─── Preview helpers ───
@@ -2807,28 +3026,6 @@ function extractPreviewHTML(el: HTMLElement): string {
   const clone = el.cloneNode(true) as HTMLElement
   clone.classList.forEach(c => { if (c.startsWith('stylesnap-') || c === LOCKED_CLASS) clone.classList.remove(c) })
   return clone.outerHTML
-}
-
-function buildPreviewCSS(el: HTMLElement): string {
-  const parsed = _lastParsedCSS || parseElement(el)
-  const { styles, interactionStyles = {}, responsiveStyles = {} } = parsed
-  const selector = parsed.selector || el.tagName.toLowerCase() + (el.id ? `#${el.id}` : '')
-
-  const formatRule = (props: Record<string, string>) =>
-    Object.entries(props)
-      .filter(([, v]) => v !== 'initial' && v !== 'inherit' && v !== 'unset')
-      .map(([k, v]) => `  ${k}: ${v};`).join('\n')
-
-  let css = `${selector} {\n${formatRule(styles)}\n}`
-  for (const [pseudo, props] of Object.entries(interactionStyles)) {
-    if (!props || Object.keys(props).length === 0) continue
-    css += `\n\n${selector}:${pseudo} {\n${formatRule(props)}\n}`
-  }
-  for (const [query, props] of Object.entries(responsiveStyles)) {
-    if (!props || Object.keys(props).length === 0) continue
-    css += `\n\n@media ${query} {\n  ${selector} {\n${formatRule(props)}\n  }\n}`
-  }
-  return css
 }
 
 function detectBackground(el: HTMLElement | null): string {
@@ -2903,20 +3100,21 @@ function buildPreviewDoc(code: string, type: string, previewHTML?: string, _prev
       .trim()
 
     return `<!DOCTYPE html><html><head>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@3/dist/tailwind.min.css" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
 <style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:${bg};padding:2rem;}</style>
 </head><body>${html || '<div class="text-slate-400 text-sm">Could not extract JSX — check code editor</div>'}</body></html>`
   }
 
   if (type === 'css') {
     const html = previewHTML || '<div class="target"><h2>Preview</h2><p>Sample text</p><button>Button</button></div>'
-    return `<!DOCTYPE html><html><head><style>body{padding:2rem;background:${bg};font-family:system-ui,sans-serif;}${code.replace(/^\s*\{?\s*/,'').replace(/\}\s*$/,'')}</style></head><body>${html}</body></html>`
+    const safeCode = code.replace(/^\s*\{?\s*/,'').replace(/\}\s*$/,'').replace(/<\/style/gi, '<\\/style')
+    return `<!DOCTYPE html><html><head><style>body{padding:2rem;background:${bg};font-family:system-ui,sans-serif;}${safeCode}</style></head><body>${html}</body></html>`
   }
 
   if (type === 'tailwind') {
     const classes = code.replace(/\n/g, ' ').trim()
     return `<!DOCTYPE html><html><head>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@3/dist/tailwind.min.css" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
 <style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:${bg};}</style>
 </head><body><div class="${classes}">Tailwind Preview</div></body></html>`
   }
@@ -2931,13 +3129,243 @@ function escapeHTML(s: string): string {
   return div.innerHTML
 }
 
-async function showSettingsPopup() {
-  // Close other popups first
-  const palettePopup = document.getElementById('stylesnap-palette-popup')
-  if (palettePopup) palettePopup.remove()
+// ─── Feedback Modal ───────────────────────────────────────────────────────────
 
-  const existing = document.getElementById('stylesnap-settings-popup')
+async function showFeedbackModal() {
+  $$('ss-feedback-modal')?.remove()
+  $$('ss-feedback-backdrop')?.remove()
+
+  const lang = await detectLang()
+  const t = translations[lang] || translations.en
+
+  const modal = document.createElement('div')
+  modal.id = 'ss-feedback-modal'
+  modal.setAttribute('data-stylesnap', 'true')
+
+  modal.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:13px;font-weight:600;color:#e2e8f0;">${t.feedback || 'Feedback'}</span>
+      <button id="ss-fbm-close" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;padding:0;">×</button>
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:10px;">
+      <button class="ss-fbm-type" data-type="praise" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">👍 ${t.feedbackPraise || 'Love It'}</button>
+      <button class="ss-fbm-type" data-type="bug" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">🐛 ${t.feedbackBug || 'Bug'}</button>
+      <button class="ss-fbm-type" data-type="feature" style="flex:1;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:5px;color:#94a3b8;cursor:pointer;font-size:10px;padding:5px 2px;">💡 ${t.feedbackFeature || 'Request'}</button>
+      <button class="ss-fbm-type" data-type="general" style="flex:1;background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.3);border-radius:5px;color:#a5b4fc;cursor:pointer;font-size:10px;padding:5px 2px;">💬 ${t.feedbackGeneral || 'Other'}</button>
+    </div>
+    <textarea id="ss-fbm-msg" placeholder="${t.feedbackPlaceholder || 'Tell us what you think…'}" style="width:100%;height:80px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:11px;padding:8px;resize:none;box-sizing:border-box;font-family:system-ui,sans-serif;outline:none;display:block;"></textarea>
+    <input id="ss-fbm-email" type="email" placeholder="${t.feedbackEmailPlaceholder || 'Email (optional, for replies)'}" style="width:100%;margin-top:6px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e2e8f0;font-size:11px;padding:7px 8px;box-sizing:border-box;outline:none;display:block;">
+    <button id="ss-fbm-submit" style="margin-top:8px;width:100%;background:#6366f1;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;font-weight:600;padding:9px;transition:opacity 0.15s;">${t.feedbackSubmit || 'Send Feedback'}</button>
+    <div style="font-size:10px;color:#475569;text-align:center;margin-top:8px;">${t.feedbackContactHint || 'Need direct help?'} <a href="mailto:hi@lucidlibs.dev" style="color:#818cf8;text-decoration:none;">hi@lucidlibs.dev</a></div>
+  `
+
+  Object.assign(modal.style, {
+    position: 'fixed',
+    zIndex: '9999999',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    background: 'rgba(10, 15, 28, 0.98)',
+    border: '1px solid rgba(99, 102, 241, 0.35)',
+    borderRadius: '12px',
+    padding: '18px',
+    width: '300px',
+    maxWidth: 'calc(100vw - 32px)',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
+    fontFamily: 'system-ui, sans-serif',
+    color: '#e2e8f0',
+  })
+
+  const backdrop = document.createElement('div')
+  backdrop.id = 'ss-feedback-backdrop'
+  backdrop.setAttribute('data-stylesnap', 'true')
+  Object.assign(backdrop.style, {
+    position: 'fixed', inset: '0', zIndex: '9999998',
+    background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)',
+  })
+
+  const close = () => { modal.remove(); backdrop.remove() }
+  backdrop.addEventListener('click', close)
+  modal.querySelector('#ss-fbm-close')?.addEventListener('click', close)
+
+  let fbType = 'general'
+  modal.querySelectorAll('.ss-fbm-type').forEach(btn => {
+    btn.addEventListener('click', function(this: HTMLElement) {
+      fbType = this.dataset.type || 'general'
+      modal.querySelectorAll('.ss-fbm-type').forEach(b => {
+        ;(b as HTMLElement).style.background = 'rgba(255,255,255,0.06)'
+        ;(b as HTMLElement).style.color = '#94a3b8'
+        ;(b as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'
+      })
+      this.style.background = 'rgba(99,102,241,0.2)'
+      this.style.color = '#a5b4fc'
+      this.style.borderColor = 'rgba(99,102,241,0.3)'
+    })
+  })
+
+  modal.querySelector('#ss-fbm-submit')?.addEventListener('click', async function(this: HTMLButtonElement) {
+    const msg = (modal.querySelector('#ss-fbm-msg') as HTMLTextAreaElement)?.value?.trim()
+    if (!msg) { showToast('Write something first'); return }
+    const email = (modal.querySelector('#ss-fbm-email') as HTMLInputElement)?.value?.trim() || undefined
+    this.disabled = true; this.textContent = '…'; this.style.opacity = '0.7'
+    const result = await submitFeedback({
+      type: fbType as 'bug' | 'feature' | 'general' | 'praise',
+      message: msg,
+      email,
+      metadata: { version: chrome.runtime?.getManifest?.()?.version || 'unknown', lang },
+    })
+    if (result.ok) {
+      modal.innerHTML = `<div style="text-align:center;padding:20px 0;">
+        <div style="font-size:28px;margin-bottom:8px;">🙌</div>
+        <div style="font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:4px;">${t.feedbackThanks || 'Thank you!'}</div>
+        <div style="font-size:11px;color:#64748b;">${t.feedbackThanksDesc || 'We read every message.'}</div>
+      </div>`
+      setTimeout(close, 2200)
+    } else {
+      this.disabled = false; this.style.opacity = ''
+      this.textContent = t.feedbackSubmit || 'Send Feedback'
+      showToast(result.error || t.feedbackError || 'Failed to send')
+    }
+  })
+
+  stAppend(backdrop)
+  stAppend(modal)
+  setTimeout(() => (modal.querySelector('#ss-fbm-msg') as HTMLTextAreaElement)?.focus(), 50)
+}
+
+// ─── Upgrade Modal ────────────────────────────────────────────────────────────
+
+async function showUpgradeModal(trigger?: string) {
+  $$('ss-upgrade-modal')?.remove()
+  $$('ss-upgrade-backdrop')?.remove()
+
+  const lang = await detectLang()
+  const t = translations[lang] || translations.en
+
+  const modal = document.createElement('div')
+  modal.id = 'ss-upgrade-modal'
+  modal.setAttribute('data-stylesnap', 'true')
+
+  const features = [
+    { icon: '∞', label: t.featUnlimited || 'Unlimited extractions', desc: t.featUnlimitedDesc || 'No daily limits' },
+    { icon: '🎨', label: t.featTailwind || 'Tailwind class export', desc: t.featTailwindDesc || '300+ mapping rules' },
+    { icon: '⚛️', label: t.featReactVue || 'React / Vue code gen', desc: t.featReactVueDesc || 'Ready-to-paste components' },
+    { icon: '🪙', label: t.featTokens || 'Design token export', desc: t.featTokensDesc || 'Full color & spacing system' },
+    { icon: '🤖', label: t.featAIFallback || 'AI code fallback', desc: t.featAIFallbackDesc || 'For complex patterns' },
+    { icon: '♾️', label: t.featUpdates || 'Lifetime updates', desc: t.featUpdatesDesc || 'Pay once, own forever' },
+  ]
+
+  const quotaBanner = trigger === 'quota'
+    ? `<div style="background:rgba(251,146,60,0.1);border:1px solid rgba(251,146,60,0.3);border-radius:6px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#fbbf24;text-align:center;">
+        ⚠️ You've used all 20 free extractions today. Upgrade for unlimited access.
+      </div>`
+    : ''
+
+  modal.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#e2e8f0;">${t.upgradeModalTitle || 'StyleSnap Pro'}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:1px;">${t.oneTime || 'One-time payment · Lifetime access'}</div>
+      </div>
+      <button id="ss-upgrade-close" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;padding:0;flex-shrink:0;">×</button>
+    </div>
+    ${quotaBanner}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
+      ${features.map(f => `
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px;">
+          <div style="font-size:13px;margin-bottom:2px;">${f.icon} <span style="font-size:11px;font-weight:600;color:#e2e8f0;">${f.label}</span></div>
+          <div style="font-size:9px;color:#64748b;line-height:1.4;">${f.desc}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div style="background:linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.1));border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:12px;text-align:center;margin-bottom:10px;">
+      <div style="font-size:22px;font-weight:700;color:#e2e8f0;">$29</div>
+      <div style="font-size:10px;color:#94a3b8;margin-top:2px;">${t.oneTime || 'One-time · No subscription · Lifetime access'}</div>
+    </div>
+    <button id="ss-upgrade-cta" style="width:100%;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;border-radius:7px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;padding:11px;transition:opacity 0.15s;margin-bottom:8px;">${t.upgradeToPro || 'Upgrade to Pro — $29'}</button>
+    <div style="display:flex;align-items:center;gap:4px;margin-bottom:10px;">
+      <input id="ss-upgrade-key" type="text" placeholder="${t.licenseKeyLabel || 'License Key'} (PRO-XXXX-…)" style="flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:5px;color:#e2e8f0;font-size:11px;padding:7px 8px;outline:none;box-sizing:border-box;">
+      <button id="ss-upgrade-activate" style="background:#1e293b;border:1px solid rgba(99,102,241,0.4);border-radius:5px;color:#818cf8;cursor:pointer;font-size:11px;font-weight:600;padding:7px 10px;white-space:nowrap;">${t.activate || 'Activate'}</button>
+    </div>
+    <div style="text-align:center;font-size:10px;color:#475569;">
+      <span>${t.secure || '🔒 Secure'}</span> · <span>${t.instant || '📧 Instant'}</span> · <span>${t.lifetime || '♾️ Lifetime'}</span>
+    </div>
+  `
+
+  Object.assign(modal.style, {
+    position: 'fixed',
+    zIndex: '9999999',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    background: 'rgba(10, 15, 28, 0.98)',
+    border: '1px solid rgba(99, 102, 241, 0.35)',
+    borderRadius: '12px',
+    padding: '18px',
+    width: '340px',
+    maxWidth: 'calc(100vw - 32px)',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.7)',
+    fontFamily: 'system-ui, sans-serif',
+    color: '#e2e8f0',
+  })
+
+  // Backdrop
+  const backdrop = document.createElement('div')
+  backdrop.id = 'ss-upgrade-backdrop'
+  backdrop.setAttribute('data-stylesnap', 'true')
+  Object.assign(backdrop.style, {
+    position: 'fixed', inset: '0', zIndex: '9999998',
+    background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)',
+  })
+
+  const close = () => { modal.remove(); backdrop.remove() }
+  backdrop.addEventListener('click', close)
+  modal.querySelector('#ss-upgrade-close')?.addEventListener('click', close)
+
+  modal.querySelector('#ss-upgrade-cta')?.addEventListener('click', async function(this: HTMLButtonElement) {
+    const btn = this
+    btn.disabled = true; btn.textContent = 'Opening…'; btn.style.opacity = '0.7'
+    try {
+      const url = await createCheckout()
+      window.open(url, '_blank')
+      setTimeout(() => {
+        btn.disabled = false; btn.style.opacity = ''
+        btn.textContent = t.upgradeToPro || 'Upgrade to Pro — $29'
+        const keyInput = modal.querySelector('#ss-upgrade-key') as HTMLInputElement | null
+        if (keyInput) { keyInput.placeholder = 'Paste license key from email'; keyInput.focus() }
+      }, 2000)
+    } catch {
+      btn.disabled = false; btn.style.opacity = ''
+      btn.textContent = t.upgradeToPro || 'Upgrade to Pro — $29'
+      showToast(t.checkoutError || 'Checkout unavailable — try again')
+    }
+  })
+
+  modal.querySelector('#ss-upgrade-activate')?.addEventListener('click', async function(this: HTMLButtonElement) {
+    const keyInput = modal.querySelector('#ss-upgrade-key') as HTMLInputElement
+    const key = keyInput?.value?.trim()
+    if (!key) { showToast('Enter a license key'); return }
+    this.disabled = true; this.textContent = '…'
+    const result = await activateLicenseKey(key)
+    if (result.success) {
+      showToast(t.activateSuccess || 'License activated! 🎉')
+      close()
+    } else {
+      this.disabled = false; this.textContent = t.activate || 'Activate'
+      showToast(result.error || t.activateFail || 'Activation failed')
+    }
+  })
+
+  stAppend(backdrop)
+  stAppend(modal)
+}
+
+async function showSettingsPopup() {
+  const existing = $$('stylesnap-settings-popup')
   if (existing) { existing.remove(); return }
+  closeHintPopups('stylesnap-settings-popup')
 
   // Floating popup (not bottom sheet)
   const popup = document.createElement('div')
@@ -2953,7 +3381,7 @@ async function showSettingsPopup() {
     minWidth: '280px',
     maxWidth: '300px',
     maxHeight: '80vh',
-    overflow: 'hidden',
+    overflow: 'hidden auto',
     boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     fontFamily: 'system-ui, sans-serif',
     color: '#e2e8f0',
@@ -2988,10 +3416,9 @@ async function showSettingsPopup() {
   }
 
   // Load license + settings + AI config
-  const [licenseStatus, settingsData, aiCfg] = await Promise.all([
+  const [licenseStatus, settingsData] = await Promise.all([
     getLicenseStatus(),
     new Promise<Record<string, unknown>>(res => chrome.storage.local.get(['stylesnap_settings'], r => res(r.stylesnap_settings || {}))),
-    new Promise<{apiKey?: string; apiEndpoint?: string; model?: string}>(res => chrome.storage.local.get(['stylesnap_ai_config'], r => res(r.stylesnap_ai_config || {}))),
   ])
   _licenseIsPro = licenseStatus.isPro
 
@@ -3020,9 +3447,8 @@ async function showSettingsPopup() {
   // SVG icon helpers (all Lucide line style, 14×14, stroke 1.75)
   const svg14i = `${SVG} width="14" height="14" style="flex:none;vertical-align:middle;margin-right:4px;"`
   const iconKey     = `<svg ${svg14i}><path d="M21 2 19 4M11.4 14.6a5 5 0 1 0-6.8-6.8 5 5 0 0 0 6.8 6.8Z"/><circle cx="8" cy="8" r="1.5"/><path d="m21 2-2.6 2.6"/></svg>`
-  const iconSparkle = `<svg ${svg14i}><path d="M12 3 9.2 8.5 3.3 9.6l4.2 4.3-1 6.1 5.5-2.9 5.5 2.9-1-6.1 4.2-4.3-5.9-1.1Z"/><path d="M18 2 17 4.5 14.5 5.5 17 6.5 18 9l1-2.5 2.5-1-2.5-1Z"/></svg>`
   const iconSlider  = `<svg ${svg14i}><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></svg>`
-  const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.04);border-radius:6px;padding:2px;'
+  const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.04);border-radius:6px;padding:2px;margin-left:auto;'
   const chipStyle = 'background:transparent;border:none;color:#94a3b8;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;transition:all 0.12s;'
   const chipActiveStyle = 'background:rgba(99,102,241,0.2);color:#e2e8f0;'
 
@@ -3088,16 +3514,8 @@ async function showSettingsPopup() {
       <div id="ss-floating-btn-hint" style="font-size:9px;color:#64748b;margin-top:-2px;margin-bottom:4px;margin-left:2px;${settings.showFloatingBtn !== false ? 'display:none;' : ''}">
         💡 Click the StyleSnap toolbar icon to reopen settings
       </div>
-      ${toggleHtml('ss-pref-auto-inspect', settings.autoInspect, 'void(0)')}
-      ${toggleHtml('ss-pref-auto-copy', settings.autoCopyOnLock === true, 'void(0)')}
       ${toggleHtml('ss-pref-show-tw', settings.showTailwindOverlay !== false, 'void(0)')}
-      <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-        <span style="font-size:11px;color:#cbd5e1;white-space:nowrap;">Copy format:</span>
-        ${chipGroup('ss-pref-copy-format', [
-          {value: 'css', label: 'Raw CSS'},
-          {value: 'tailwind', label: 'Tailwind'},
-        ], (settings.copyFormat || 'css'))}
-      </div>
+      ${toggleHtml('ss-pref-side-panel', settings.showSidePanel !== false, 'void(0)')}
       <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
         <span style="font-size:11px;color:#cbd5e1;white-space:nowrap;">Overlay:</span>
         ${chipGroup('ss-pref-overlay-side', [
@@ -3121,33 +3539,6 @@ async function showSettingsPopup() {
           {value: 'hsl', label: 'HSL'},
         ], (settings.colorFormat || 'rgb'))}
       </div>
-      <div style="margin-top:6px;font-size:11px;color:#cbd5e1;display:flex;align-items:center;gap:8px;">
-        <span style="white-space:nowrap;">Color:</span>
-        ${chipGroup('ss-pref-color-format', [
-          {value: 'rgb', label: 'RGB'},
-          {value: 'hex', label: 'Hex'},
-          {value: 'hsl', label: 'HSL'},
-        ], (settings.colorFormat || 'rgb'))}
-      </div>
-      ${toggleHtml('ss-pref-shorten-css', settings.shortenCSS !== false, 'void(0)')}
-    </div>
-
-    <!-- AI -->
-    <div style="${sectionStyle}">
-      ${iconSparkle} AI Component Generator
-      ${licenseStatus.isPro ? `
-        <div style="font-size:10px;color:#22c55e;margin-bottom:4px;">Pro — use your own API key</div>
-        <div style="display:flex;flex-direction:column;gap:4px;">
-          <input id="ss-ai-key" type="password" placeholder="OpenAI / Groq API Key" value="${esc(aiCfg.apiKey || '')}" style="${inputStyle}">
-          <input id="ss-ai-endpoint" type="text" placeholder="API Endpoint" value="${esc(aiCfg.apiEndpoint || 'https://api.openai.com/v1/chat/completions')}" style="${inputStyle}">
-          <input id="ss-ai-model" type="text" placeholder="Model" value="${esc(aiCfg.model || 'gpt-4o-mini')}" style="${inputStyle}">
-          <button id="ss-ai-save" style="${btnStyle}">Save</button>
-        </div>
-        <div style="font-size:10px;color:#64748b;margin-top:4px;">Your key is stored locally and sent only to the endpoint above.</div>
-      ` : `
-        <div style="font-size:10px;color:#94a3b8;">1 free generation per day — powered by StyleSnap</div>
-        <div style="font-size:10px;color:#64748b;margin-top:2px;">Upgrade to Pro to use your own API key with unlimited generations.</div>
-      `}
     </div>
 
     <div style="font-size:10px;color:#475569;text-align:center;padding-top:10px;">
@@ -3163,34 +3554,27 @@ async function showSettingsPopup() {
     if (el) el.textContent = (t as Record<string, string>)[key] || key
   }
   setLabel('ss-pref-floating-btn', 'floatingBtn')
-  setLabel('ss-pref-auto-inspect', 'autoInspect')
-  setLabel('ss-pref-auto-copy', 'autoCopyOnLock')
   setLabel('ss-pref-show-tw', 'showTailwindOverlay')
-  setLabel('ss-pref-shorten-css', 'shortenCSS')
-
+  const spLabel = popup.querySelector('#ss-label-ss-pref-side-panel')
+  if (spLabel) spLabel.textContent = (t as Record<string, string>).showSidePanel || 'Inspector panel (box model + preview)'
   // ─── Event handlers ────────────────────────────────────────────────
 
   const savePrefs = () => {
     const fbChecked = (popup.querySelector('#ss-pref-floating-btn') as HTMLInputElement)?.checked
-    const aiChecked = (popup.querySelector('#ss-pref-auto-inspect') as HTMLInputElement)?.checked
-    const acChecked = (popup.querySelector('#ss-pref-auto-copy') as HTMLInputElement)?.checked
     const twChecked = (popup.querySelector('#ss-pref-show-tw') as HTMLInputElement)?.checked
-    const cf = (popup.querySelector('#ss-pref-copy-format .active-chip') as HTMLElement)?.dataset.value as 'css' | 'tailwind' || 'css'
+    const spChecked = (popup.querySelector('#ss-pref-side-panel') as HTMLInputElement)?.checked
     const os = (popup.querySelector('#ss-pref-overlay-side .active-chip') as HTMLElement)?.dataset.value as 'right' | 'left' || 'right'
     const am = parseInt((popup.querySelector('#ss-pref-assist-mode .active-chip') as HTMLElement)?.dataset.value || '1', 10)
     const cform = (popup.querySelector('#ss-pref-color-format .active-chip') as HTMLElement)?.dataset.value as 'rgb' | 'hex' | 'hsl' || 'rgb'
-    const shortenChecked = (popup.querySelector('#ss-pref-shorten-css') as HTMLInputElement)?.checked
     const newSettings: Partial<UserSettings> = {
       showFloatingBtn: fbChecked,
-      autoInspect: aiChecked,
-      autoCopyOnLock: acChecked,
       showTailwindOverlay: twChecked,
-      copyFormat: cf,
+      showSidePanel: spChecked,
       overlaySide: os,
       assistMode: am as 0 | 1 | 2,
       colorFormat: cform,
-      shortenCSS: shortenChecked,
     }
+    _showSidePanel = spChecked !== false
     chrome.storage.local.get(['stylesnap_settings'], (res) => {
       const cur = res.stylesnap_settings || {}
       chrome.storage.local.set({ stylesnap_settings: { ...cur, ...newSettings } })
@@ -3205,8 +3589,11 @@ async function showSettingsPopup() {
     const hint = popup.querySelector('#ss-floating-btn-hint') as HTMLElement | null
     if (hint) hint.style.display = fbChecked ? 'none' : 'block'
   })
-  popup.querySelector('#ss-pref-auto-inspect')?.addEventListener('change', savePrefs)
-  popup.querySelector('#ss-pref-auto-copy')?.addEventListener('change', savePrefs)
+  popup.querySelector('#ss-pref-side-panel')?.addEventListener('change', () => {
+    savePrefs()
+    if (!_showSidePanel) hideSidePanel()
+    else if (lockedElement) { const ov = $$(OVERLAY_ID); if (ov) updateSidePanel(lockedElement as HTMLElement, _lastParsedCSS, ov) }
+  })
   popup.querySelector('#ss-pref-show-tw')?.addEventListener('change', savePrefs)
 
   // Chip group click handlers — replaces old select change listeners
@@ -3226,35 +3613,14 @@ async function showSettingsPopup() {
       savePrefs()
     })
   }
-  bindChipGroup('ss-pref-copy-format')
   bindChipGroup('ss-pref-overlay-side')
   bindChipGroup('ss-pref-assist-mode')
   bindChipGroup('ss-pref-color-format')
-  popup.querySelector('#ss-pref-shorten-css')?.addEventListener('change', savePrefs)
-
   // Close
   popup.querySelector('#ss-settings-close')?.addEventListener('click', close)
 
-  // Click outside to close
-  setTimeout(() => {
-    const closeOnOutside = (ev: MouseEvent) => {
-      if (!popup.contains(ev.target as Node)) {
-        close()
-        document.removeEventListener('click', closeOnOutside)
-      }
-    }
-    document.addEventListener('click', closeOnOutside)
-  }, 200)
-
-  // AI Save (Pro users only — visible when inputs exist)
-  popup.querySelector('#ss-ai-save')?.addEventListener('click', () => {
-    const key = (popup.querySelector('#ss-ai-key') as HTMLInputElement)?.value || ''
-    const endpoint = (popup.querySelector('#ss-ai-endpoint') as HTMLInputElement)?.value || 'https://api.openai.com/v1/chat/completions'
-    const model = (popup.querySelector('#ss-ai-model') as HTMLInputElement)?.value || 'gpt-4o-mini'
-    chrome.storage.local.set({ stylesnap_ai_config: { apiKey: key, apiEndpoint: endpoint, model } }, () => {
-      showToast('AI config saved!')
-    })
-  })
+  // Click outside to close — leak-proof, auto-cleans on any removal path
+  attachOutsideClose(popup, { delay: 200 })
 
   // License Activate
   popup.querySelector('#ss-license-activate')?.addEventListener('click', async () => {
@@ -3274,12 +3640,31 @@ async function showSettingsPopup() {
   })
 
   // License Buy
-  popup.querySelector('#ss-license-buy')?.addEventListener('click', async () => {
-    showToast('Opening checkout...')
+  popup.querySelector('#ss-license-buy')?.addEventListener('click', async function(this: HTMLButtonElement) {
+    const btn = this
+    const original = btn.textContent
+    btn.disabled = true
+    btn.textContent = 'Opening…'
+    btn.style.opacity = '0.7'
     try {
       const url = await createCheckout()
       window.open(url, '_blank')
+      // After redirect, prompt to activate
+      setTimeout(() => {
+        btn.disabled = false
+        btn.textContent = original
+        btn.style.opacity = ''
+        const keyInput = popup.querySelector('#ss-license-key') as HTMLInputElement | null
+        if (keyInput) {
+          keyInput.placeholder = 'Paste license key from email'
+          keyInput.focus()
+          showToast('Purchase complete? Paste your license key above.')
+        }
+      }, 2000)
     } catch {
+      btn.disabled = false
+      btn.textContent = original
+      btn.style.opacity = ''
       showToast('Checkout unavailable — try again later')
     }
   })
@@ -3310,49 +3695,9 @@ async function showSettingsPopup() {
     })
   })
 
-  // Feedback — slides up from bottom of Settings panel
-  let fbOpen = false
-  const fbDrawer = popup.querySelector('#ss-feedback-drawer') as HTMLElement | null
-  const openFb = () => {
-    fbOpen = true
-    if (fbDrawer) fbDrawer.style.transform = 'translateY(0)'
-  }
-  const closeFb = () => {
-    fbOpen = false
-    if (fbDrawer) fbDrawer.style.transform = 'translateY(100%)'
-  }
+  // Feedback button → open independent modal
   popup.querySelector('#ss-btn-feedback')?.addEventListener('click', () => {
-    fbOpen ? closeFb() : openFb()
-  })
-  popup.querySelector('#ss-fb-close')?.addEventListener('click', closeFb)
-
-  // Feedback type selector
-  let fbType = 'general'
-  popup.querySelectorAll('.ss-fb-type').forEach(btn => {
-    btn.addEventListener('click', function(this: HTMLElement) {
-      fbType = this.dataset.type || 'general'
-      popup.querySelectorAll('.ss-fb-type').forEach(b => (b as HTMLElement).style.background = 'rgba(255,255,255,0.06)')
-      this.style.background = 'rgba(99,102,241,0.2)'
-    })
-  })
-  const fbDefault = popup.querySelector('.ss-fb-type[data-type="general"]') as HTMLElement
-  if (fbDefault) fbDefault.style.background = 'rgba(99,102,241,0.2)'
-
-  // Submit
-  popup.querySelector('#ss-fb-submit')?.addEventListener('click', async () => {
-    const msg = (popup.querySelector('#ss-fb-msg') as HTMLTextAreaElement)?.value?.trim()
-    if (!msg) { showToast('Write something first'); return }
-    const email = (popup.querySelector('#ss-fb-email') as HTMLInputElement)?.value?.trim() || undefined
-    showToast('Sending…')
-    const result = await submitFeedback({ type: fbType as 'bug'|'feature'|'general'|'praise', message: msg, email })
-    if (result.ok) {
-      showToast(t.feedbackThanks || 'Thank you!')
-      closeFb()
-      const ta = popup.querySelector('#ss-fb-msg') as HTMLTextAreaElement
-      if (ta) ta.value = ''
-    } else {
-      showToast(result.error || 'Failed to send')
-    }
+    showFeedbackModal()
   })
 }
 
@@ -3388,7 +3733,7 @@ function injectFloatingBtnStyles() {
       box-sizing: border-box !important;
       width: 44px !important;
       height: 44px !important;
-      opacity: 0.45 !important;
+      opacity: 0.75 !important;
     }
     #stylesnap-floating-btn:hover,
     #stylesnap-floating-btn.is-active,
@@ -3536,8 +3881,16 @@ function injectFloatingBtnStyles() {
   document.head.appendChild(style)
 }
 
+let _fbInitializing = false
+let _fbResizeHandler: (() => void) | null = null
 async function initFloatingButton() {
+  // Synchronous re-entrancy guard: the async storage callback below opens a
+  // window where a second call (e.g. onExecute's 1500ms retry) could create a
+  // duplicate button. Bail immediately if one exists or init is in flight.
+  if (_fbInitializing || $$(FLOATING_BTN_ID)) return
+  _fbInitializing = true
   chrome.storage.local.get(['stylesnap_settings'], async (res) => {
+   try {
     const s = res.stylesnap_settings || {}
     if (s.showFloatingBtn === false) {
       const existing = $$(FLOATING_BTN_ID)
@@ -3575,13 +3928,47 @@ async function initFloatingButton() {
     let hasMoved = false
     let startX = 0, startY = 0
     let initialRight = 24, initialBottom = 24
+    let posCustomized = false  // F6: only persist position once the user has actually moved it
 
     chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
       if (res.stylesnap_btn_pos) {
+        posCustomized = true
         btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
         btn.style.setProperty('bottom', `${res.stylesnap_btn_pos.bottom}px`, 'important')
       }
     })
+
+    // Window-level drag listeners are added only for the duration of a drag
+    // (mousedown→mouseup) so they never accumulate across re-inits. (F1)
+    const onDragMove = (e: MouseEvent) => {
+      if (!isDragging) return
+      const dx = e.clientX - startX
+      const dy = e.clientY - startY
+      if (Math.abs(dx) > 8 || Math.abs(dy) > 8) hasMoved = true
+      if (hasMoved) {
+        const padding = 10, btnSize = 44
+        const newRight = Math.max(padding, Math.min(initialRight - dx, window.innerWidth - btnSize - padding))
+        const newBottom = Math.max(padding, Math.min(initialBottom - dy, window.innerHeight - btnSize - padding))
+        btn.style.setProperty('right', `${newRight}px`, 'important')
+        btn.style.setProperty('bottom', `${newBottom}px`, 'important')
+      }
+    }
+    const onDragEnd = () => {
+      if (!isDragging) return
+      isDragging = false
+      window.removeEventListener('mousemove', onDragMove)
+      window.removeEventListener('mouseup', onDragEnd)
+      btn.classList.remove('is-dragging')
+      btn.style.setProperty('cursor', 'pointer', 'important')
+      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
+      if (hasMoved) {
+        const rect = btn.getBoundingClientRect()
+        posCustomized = true
+        chrome.storage.local.set({
+          stylesnap_btn_pos: { right: window.innerWidth - rect.right, bottom: window.innerHeight - rect.bottom },
+        })
+      }
+    }
 
     btn.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return
@@ -3595,58 +3982,28 @@ async function initFloatingButton() {
       btn.classList.add('is-dragging')
       btn.style.setProperty('cursor', 'grabbing', 'important')
       btn.style.setProperty('transition', 'opacity 0.3s ease', 'important')
+      window.addEventListener('mousemove', onDragMove)
+      window.addEventListener('mouseup', onDragEnd)
       e.preventDefault()
     })
 
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return
-      const dx = e.clientX - startX
-      const dy = e.clientY - startY
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true
-      if (hasMoved) {
-        let newRight = initialRight - dx
-        let newBottom = initialBottom - dy
-        const padding = 10, btnSize = 44
-        newRight = Math.max(padding, Math.min(newRight, window.innerWidth - btnSize - padding))
-        newBottom = Math.max(padding, Math.min(newBottom, window.innerHeight - btnSize - padding))
-        btn.style.setProperty('right', `${newRight}px`, 'important')
-        btn.style.setProperty('bottom', `${newBottom}px`, 'important')
-      }
-    })
-
-    window.addEventListener('mouseup', () => {
-      if (!isDragging) return
-      isDragging = false
-      btn.classList.remove('is-dragging')
-      btn.style.setProperty('cursor', 'pointer', 'important')
-      btn.style.setProperty('transition', 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease', 'important')
-      if (hasMoved) {
-        const rect = btn.getBoundingClientRect()
-        chrome.storage.local.set({
-          stylesnap_btn_pos: {
-            right: window.innerWidth - rect.right,
-            bottom: window.innerHeight - rect.bottom
-          }
-        })
-      }
-    })
-
     // ─── Resize boundary clamp ───
-    window.addEventListener('resize', () => {
-      if (!$$(FLOATING_BTN_ID)) return
-      const btn = $$(FLOATING_BTN_ID)!
-      const rect = btn.getBoundingClientRect()
+    // Remove-before-add so re-inits never stack resize listeners. (F1)
+    if (_fbResizeHandler) window.removeEventListener('resize', _fbResizeHandler)
+    _fbResizeHandler = () => {
+      const b = $$(FLOATING_BTN_ID)
+      if (!b) return
+      const rect = b.getBoundingClientRect()
       const padding = 10, btnSize = 44
-      let right = window.innerWidth - rect.right
-      let bottom = window.innerHeight - rect.bottom
-      right = Math.max(padding, Math.min(right, window.innerWidth - btnSize - padding))
-      bottom = Math.max(padding, Math.min(bottom, window.innerHeight - btnSize - padding))
-      btn.style.setProperty('right', `${right}px`, 'important')
-      btn.style.setProperty('bottom', `${bottom}px`, 'important')
-      chrome.storage.local.set({
-        stylesnap_btn_pos: { right, bottom }
-      })
-    })
+      const right = Math.max(padding, Math.min(window.innerWidth - rect.right, window.innerWidth - btnSize - padding))
+      const bottom = Math.max(padding, Math.min(window.innerHeight - rect.bottom, window.innerHeight - btnSize - padding))
+      b.style.setProperty('right', `${right}px`, 'important')
+      b.style.setProperty('bottom', `${bottom}px`, 'important')
+      // F6: only persist if the user has customized the position — never overwrite
+      // the default "bottom-right" anchor just because the window was resized.
+      if (posCustomized) chrome.storage.local.set({ stylesnap_btn_pos: { right, bottom } })
+    }
+    window.addEventListener('resize', _fbResizeHandler)
 
     // ─── Button action ───
     const btnInner = btn.querySelector('#stylesnap-floating-btn-inner')
@@ -3670,7 +4027,62 @@ async function initFloatingButton() {
 
     // sync initial mode UI (inspectMode is always 0 on load; just render badge)
     updateModeUI()
+
+    // ─── First-install onboarding bubble ────────────────────────────
+    chrome.storage.local.get(['stylesnap_onboarded'], (ob) => {
+      if (ob.stylesnap_onboarded) return
+      const bubble = document.createElement('div')
+      bubble.id = 'ss-onboard-bubble'
+      bubble.setAttribute('data-stylesnap', 'true')
+      bubble.innerHTML = '👆 <span style="font-weight:600;">Click to inspect any element</span>'
+      Object.assign(bubble.style, {
+        position: 'fixed',
+        zIndex: '9999993',
+        bottom: '74px',
+        right: '24px',
+        background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+        color: '#fff',
+        padding: '8px 14px',
+        borderRadius: '8px',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '12px',
+        boxShadow: '0 4px 16px rgba(99,102,241,0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        whiteSpace: 'nowrap',
+        animation: 'ss-bubble-pulse 1.5s ease-in-out 3',
+        pointerEvents: 'none',
+      })
+      // Arrow pointing down to button
+      const arrow = document.createElement('div')
+      Object.assign(arrow.style, {
+        position: 'absolute', bottom: '-6px', right: '24px',
+        width: '0', height: '0',
+        borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
+        borderTop: '6px solid #8b5cf6',
+      })
+      bubble.appendChild(arrow)
+      stAppend(bubble)
+
+      // Dismiss on first interaction. Bind to btnInner (which receives the click);
+      // binding to btn would never fire because btnInner stops propagation. (F5)
+      let bubbleTimer = 0
+      const dismiss = () => {
+        if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = 0 }
+        bubble.remove()
+        chrome.storage.local.set({ stylesnap_onboarded: true })
+        btnInner?.removeEventListener('click', dismiss)
+      }
+      btnInner?.addEventListener('click', dismiss)
+      // Auto-dismiss after 8s (cleared if dismissed earlier)
+      bubbleTimer = window.setTimeout(dismiss, 8000)
+    })
+
     // NOT auto-activating any mode on page load — user must click to activate
+   } finally {
+     _fbInitializing = false
+   }
   })
 }
 
@@ -3727,10 +4139,27 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
 
     case 'EDIT_CSS': {
       const { selector, property, value } = message.payload as { selector: string; property: string; value: string }
-      const targets = document.querySelectorAll(selector)
-      targets.forEach(el => {
-        (el as HTMLElement).style.setProperty(property, value)
-      })
+      // Validate property against known CSS property names (letters and hyphens only)
+      const safePropPattern = /^[a-z][a-z0-9-]*$/
+      if (!safePropPattern.test(property)) {
+        sendResponse({ ok: false, error: 'Invalid CSS property' })
+        break
+      }
+      // Reject dangerous value patterns
+      const dangerousValuePattern = /url\s*\(|expression\s*\(|<\/?\s*style|javascript:/i
+      if (dangerousValuePattern.test(value)) {
+        sendResponse({ ok: false, error: 'Invalid CSS value' })
+        break
+      }
+      try {
+        const targets = document.querySelectorAll(selector)
+        targets.forEach(el => {
+          (el as HTMLElement).style.setProperty(property, value)
+        })
+      } catch {
+        sendResponse({ ok: false, error: 'Invalid selector' })
+        break
+      }
       sendResponse({ ok: true })
       break
     }
@@ -3767,7 +4196,16 @@ chrome.runtime.onMessage.addListener((message: { type: string; payload?: unknown
   return true
 })
 
-// ─── Debug helpers (Chrome extension tester) ────────────────────────
+// ─── Cleanup on page unload ───────────────────────────────────────────
+window.addEventListener('pagehide', () => {
+  hideOverlay()
+  document.getElementById('stylesnap-floating-btn')?.remove()
+  document.getElementById('stylesnap-overlay')?.remove()
+  document.getElementById('stylesnap-preview-panel')?.remove()
+})
+
+// ─── Debug helpers (dev build only) ─────────────────────────────────
+if (import.meta.env.DEV) {
 ;(window as any).debugShowOverlay = (targetSelector: string) => {
   const el = document.querySelector(targetSelector)
   if (!el) return 'element not found: ' + targetSelector
@@ -3903,4 +4341,5 @@ document.addEventListener('stylesnap-debug-preview-json', (() => {
     title: `${el.tagName.toLowerCase()} — JSON`,
   })
 }) as EventListener)
+} // end if (import.meta.env.DEV)
 

@@ -4,6 +4,7 @@
  */
 
 import { showInfo } from '../lib/notifications'
+import { checkAndValidateLicense } from '../lib/license'
 
 // Toolbar icon click → toggle inspect in current tab
 chrome.action.onClicked.addListener((tab) => {
@@ -27,6 +28,11 @@ chrome.runtime.onInstalled.addListener(() => {
   })
 
   showInfo('StyleSnap installed! Click the toolbar icon to inspect elements.')
+  checkAndValidateLicense()
+})
+
+chrome.runtime.onStartup.addListener(() => {
+  checkAndValidateLicense()
 })
 
 // Context menu click
