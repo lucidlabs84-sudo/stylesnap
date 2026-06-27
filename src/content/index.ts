@@ -23,14 +23,15 @@ _pageStyle.textContent = PAGE_CSS
 if (document.head) { document.head.appendChild(_pageStyle) }
 else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { document.head.appendChild(_pageStyle) }, { once: true }) }
 
-import { parseElement, extractComponentHTML, extractComponentCSS, formatCSS } from '@/lib/css-extractor'
+import { parseElement, extractComponentHTML, extractComponentCSS } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { translations, TranslationKey } from '@/lib/i18n-core'
 import {
-  stAppend, $$,
+  stAppend, $$, attachOutsideClose,
   isColorValue, escapeHtml, classNameOf, colorBlock,
   SVG, showToast,
 } from './ui'
+import type { UserSettings } from '@/shared/types'
 import { getTailwindClasses } from './tailwind'
 import { matchesAnyNode, parseRulePropsRaw, extractPseudoFromSelector } from './css-rules'
 import { S, isActive, assistMode, OVERLAY_ID, HIGHLIGHT_CLASS, LOCKED_CLASS, PREVIEW_CLASS, FLOATING_BTN_ID } from './state'
@@ -57,6 +58,9 @@ let _colorFormat: 'rgb' | 'hex' | 'hsl' = 'rgb'
 let _shortenCSS = true
 let _showTW = true
 let _overlaySide: 'left' | 'right' = 'right'
+let _copyChildren = true
+let _copyFontSizePx = false
+let _copyHtml = false
 
 function reloadFormatSettings() {
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
@@ -66,6 +70,9 @@ function reloadFormatSettings() {
     S.showSidePanel = s.showSidePanel !== false
     _showTW = s.showTailwindOverlay !== false
     _overlaySide = s.overlaySide === 'left' ? 'left' : 'right'
+    _copyChildren = s.copyChildren !== false
+    _copyFontSizePx = s.copyFontSizePx === true
+    _copyHtml = s.copyHtml === true
     // NOTE: assist mode is applied in storage.onChanged (only when it actually
     // changed) — applying it here would fight the G-key/live mode cycling, whose
     // setInspectMode writes also trigger this reload.
@@ -605,6 +612,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
         <button class="ss-copy-btn" title="${t('copyCSS')}">
           <svg ${SVG} width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> CSS
         </button>
+        <button class="ss-copy-opts" title="Copy options" style="background:transparent;border:1px solid var(--ss-border-subtle);color:#94a3b8;border-radius:var(--ss-radius-md);padding:3px 5px;cursor:pointer;font-size:10px;line-height:1;">⌄</button>
         ${_showTW ? `<button class="ss-tw-copy-btn" title="Copy Tailwind classes" style="opacity:${matchPct >= 30 ? '1' : '0.4'};">
           <svg ${SVG} width="12" height="12"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M8 12s1-2 4-2 4 2 4 2"/></svg> TW
         </button>` : ''}
@@ -810,6 +818,16 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
           copyBtn.style.color = ''
         }, 1500)
       }
+    })
+  }
+
+  // Copy options popover (⌄)
+  const copyOptsBtn = overlay.querySelector('.ss-copy-opts') as HTMLElement | null
+  if (copyOptsBtn && !copyOptsBtn.dataset.bound) {
+    copyOptsBtn.dataset.bound = 'true'
+    copyOptsBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      showCopyOptions(copyOptsBtn)
     })
   }
 
@@ -1088,14 +1106,65 @@ function getComponentCSS(el: Element): ComponentCSS {
 
 // ─── Copy CSS ─────────────────────────────────────────────────────────
 
-function copyCurrentCSS(_el: Element) {
-  if (S.lastParsedCSS && S.lastParsedCSS.styles && Object.keys(S.lastParsedCSS.styles).length > 0) {
-    const output = formatCSS(S.lastParsedCSS.styles, S.lastParsedCSS.selector)
-    navigator.clipboard.writeText(output).then(() => showToast('CSS copied!'))
-      .catch(() => showToast('Copy failed'))
-  } else {
-    showToast('No CSS to copy — hover an element first')
+/** Convert `font-size: <n>rem` → px (using the root font size) when enabled. */
+function remToPx(css: string): string {
+  const rootPx = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16
+  return css.replace(/font-size:\s*([\d.]+)rem/gi, (_m, n: string) => `font-size: ${Math.round(parseFloat(n) * rootPx)}px`)
+}
+
+/** Small popover with the 3 copy options, anchored under the ⌄ button. */
+function showCopyOptions(anchor: HTMLElement) {
+  const existing = $$('stylesnap-copy-opts')
+  if (existing) { existing.remove(); return }
+  const pop = document.createElement('div')
+  pop.id = 'stylesnap-copy-opts'
+  pop.setAttribute('data-stylesnap', 'true')
+  Object.assign(pop.style, {
+    position: 'fixed', zIndex: '999996', background: 'var(--ss-bg-panel)',
+    border: '1px solid rgba(99,102,241,0.3)', borderRadius: '8px', padding: '8px 10px',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.5)', fontFamily: 'system-ui,sans-serif',
+    color: '#e2e8f0', fontSize: '11px', width: '190px',
+  })
+  const opt = (id: string, label: string, checked: boolean) =>
+    `<label style="display:flex;align-items:center;gap:7px;padding:4px 0;cursor:pointer;">
+      <input type="checkbox" id="${id}" ${checked ? 'checked' : ''} style="margin:0;cursor:pointer;">
+      <span style="color:#cbd5e1;">${label}</span>
+    </label>`
+  pop.innerHTML = `
+    <div style="font-size:9.5px;font-weight:600;color:#64748b;letter-spacing:0.05em;text-transform:uppercase;margin-bottom:4px;">Copy options</div>
+    ${opt('ss-co-children', 'Include children CSS', _copyChildren)}
+    ${opt('ss-co-px', 'font-size → px', _copyFontSizePx)}
+    ${opt('ss-co-html', 'Include HTML', _copyHtml)}
+  `
+  stAppend(pop)
+  const r = anchor.getBoundingClientRect()
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 198))}px`
+  pop.style.top = `${Math.max(8, r.top - pop.offsetHeight - 6)}px`  // above the button
+
+  const save = () => {
+    const get = (id: string) => (pop.querySelector('#' + id) as HTMLInputElement)?.checked
+    const newSettings: Partial<UserSettings> = {
+      copyChildren: get('ss-co-children'),
+      copyFontSizePx: get('ss-co-px'),
+      copyHtml: get('ss-co-html'),
+    }
+    chrome.storage.local.get(['stylesnap_settings'], (res) => {
+      chrome.storage.local.set({ stylesnap_settings: { ...(res.stylesnap_settings || {}), ...newSettings } })
+    })
   }
+  pop.querySelectorAll('input').forEach(cb => cb.addEventListener('change', save))
+  attachOutsideClose(pop, { delay: 150 })
+}
+
+function copyCurrentCSS(el: Element) {
+  // Copy the source-preserved rule set (same as CodePen export), honoring the
+  // copy options: include children, font-size→px, include HTML.
+  let css = getComponentCSSForExport(el, _copyChildren).trim()
+  if (!css) { showToast('No CSS to copy — hover an element first'); return }
+  if (_copyFontSizePx) css = remToPx(css)
+  const output = _copyHtml ? `<!-- HTML -->\n${extractComponentHTML(el, 2)}\n\n/* CSS */\n${css}` : css
+  navigator.clipboard.writeText(output).then(() => showToast(_copyHtml ? 'HTML + CSS copied!' : 'CSS copied!'))
+    .catch(() => showToast('Copy failed'))
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────
@@ -1310,7 +1379,7 @@ function onKeyDown(e: KeyboardEvent) {
 
 // ─── CodePen Export Helpers ─────────────────────────────────────────
 
-function getComponentCSSForExport(el: Element): string {
+function getComponentCSSForExport(el: Element, includeChildren = true): string {
   const { rules, mediaRules, pseudoRules } = getComponentCSS(el)
 
   // Resolve CSS custom properties (var()) using computed style
@@ -1431,20 +1500,14 @@ function getComponentCSSForExport(el: Element): string {
 
   const cssLines: string[] = []
 
+  // Helper so the element is visible against a transparent/white background.
+  cssLines.push(`body {\n  background: #eee;\n  /* Helper in case the element has a transparent background or white text. */\n}`)
+
   // :root block with all custom properties (at the top so they're available)
   if (Object.keys(rootCustomProps).length > 0) {
     const rootLines = Object.entries(rootCustomProps).map(([k, v]) => `  ${k}: ${v};`)
     cssLines.push(`:root {\n${rootLines.join('\n')}\n}`)
   }
-
-  // ─── SVG chart helper styles (grid lines, bars — for when Tailwind/CDN CSS isn't accessible) ───
-  const svgHelpers = [
-    `svg { display: block; overflow: visible; }`,
-    `.lc-grid-y-line, .lc-grid-x-line { stroke: var(--border, #e2e8f0); stroke-width: 1; }`,
-    `.lc-grid-y-rule, .lc-grid-x-rule { stroke: var(--border, #e2e8f0); stroke-width: 1; }`,
-    `.lc-bar { rx: 4; ry: 4; }`,
-  ]
-  cssLines.push(`/* SVG chart helpers */\n${svgHelpers.join('\n')}`)
 
   // Build the main element's selector block: stylesheet rules + computed fallback
   const sorted = Array.from(rules.keys()).sort((a, b) => a.length - b.length)
@@ -1465,46 +1528,52 @@ function getComponentCSSForExport(el: Element): string {
     else otherSelectors.push(sel)
   }
 
-  // Main element block — use the SAME source as Copy CSS (S.lastParsedCSS, via
-  // formatCSS) so the inspected element's rule is byte-identical in both. The
-  // descendant / pseudo / media rules below are appended only so the component
-  // still renders in CodePen.
-  if (S.lastParsedCSS && S.lastParsedCSS.styles && Object.keys(S.lastParsedCSS.styles).length > 0) {
-    cssLines.push(formatCSS(S.lastParsedCSS.styles, S.lastParsedCSS.selector))
-  } else if (elSelectors.length > 0 || Object.keys(computedFallback).length > 0) {
-    // Fallback (no cached parse): original component-derived main block.
-    const mainProps: Record<string, string> = { ...computedFallback }
-    for (const sel of elSelectors) {
-      Object.assign(mainProps, resolveProps(el, rules.get(sel)!))
-    }
-    const bestSelector = elSelectors.length > 0
-      ? elSelectors.reduce((a, b) => a.length > b.length ? a : b)
-      : el.id ? `#${el.id}`
-      : classNameOf(el).replace(/stylesnap-\S*/g, '').trim()
-        ? `.${classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0, 3).join('.')}`
-        : el.tagName.toLowerCase()
-    const mainLines = Object.entries(mainProps).map(([k, v]) => `  ${k}: ${v};`)
-    cssLines.push(`${bestSelector} {\n${mainLines.join('\n')}\n}`)
-  }
+  // Does a selector target the element itself (vs only descendants)?
+  const matchesEl = (sel: string) => sel.split(',').some(s => {
+    try { return Array.from(document.querySelectorAll(s.trim().replace(/:hover|:focus|:active/g, ''))).includes(el) } catch { return false }
+  })
 
-  // Other stylesheet rules (descendants, pseudo-classes)
-  for (const sel of otherSelectors) {
+  // Emit every matched rule as its OWN block, preserving the page's authored
+  // selectors (CSS Scan style) — element's own rules (.btn, .demo-btn …) first,
+  // then descendant rules (.btn svg …). When includeChildren is off, only the
+  // element's own rules are emitted.
+  const ruleSelectors = includeChildren ? [...elSelectors, ...otherSelectors] : elSelectors
+  for (const sel of ruleSelectors) {
     const props = resolveProps(el, rules.get(sel)!)
     if (Object.keys(props).length === 0) continue
     const lines = Object.entries(props).map(([k, v]) => `  ${k}: ${v};`)
     cssLines.push(`${sel} {\n${lines.join('\n')}\n}`)
   }
 
-  // Pseudo-class rules
+  // Fallback: the element has no stylesheet rule of its own (inline-styled or
+  // dynamically styled) → emit its computed props under a best-guess selector.
+  if (elSelectors.length === 0 && Object.keys(computedFallback).length > 0) {
+    const sel = el.id ? `#${el.id}`
+      : classNameOf(el).replace(/stylesnap-\S*/g, '').trim()
+        ? `.${classNameOf(el).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0, 3).join('.')}`
+        : el.tagName.toLowerCase()
+    const lines = Object.entries(computedFallback).map(([k, v]) => `  ${k}: ${v};`)
+    cssLines.push(`${sel} {\n${lines.join('\n')}\n}`)
+  }
+
+  // Pseudo-class rules — merge by selector so a selector like ".demo-btn:hover"
+  // defined across several source rules emits ONE combined block (was duplicated).
+  const pseudoMerged = new Map<string, Record<string, string>>()
   for (const pr of pseudoRules) {
+    if (!includeChildren && !matchesEl(pr.selector)) continue
     const props = resolveProps(el, pr.props)
+    if (Object.keys(props).length === 0) continue
+    pseudoMerged.set(pr.selector, { ...(pseudoMerged.get(pr.selector) || {}), ...props })
+  }
+  for (const [selector, props] of pseudoMerged) {
     const lines = Object.entries(props).map(([k, v]) => `  ${k}: ${v};`)
-    cssLines.push(`${pr.selector} {\n${lines.join('\n')}\n}`)
+    cssLines.push(`${selector} {\n${lines.join('\n')}\n}`)
   }
 
   // Media query rules
   const seen = new Set<string>()
   for (const mr of mediaRules) {
+    if (!includeChildren && !matchesEl(mr.selector)) continue
     const key = mr.query + mr.selector
     if (seen.has(key)) continue
     seen.add(key)
@@ -1537,10 +1606,12 @@ function exportCSSToCodePen() {
   const el = S.lockedElement as HTMLElement
   if (!el) return
   const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
+  let css = getComponentCSSForExport(el, _copyChildren)
+  if (_copyFontSizePx) css = remToPx(css)
   submitCodePen({
     title: `StyleSnap — ${title} (CSS)`,
     html: extractComponentHTML(el, 2),
-    css: `/* Exported by StyleSnap */\n${getComponentCSSForExport(el)}`,
+    css: `/* Exported by StyleSnap */\n${css}`,
     editors: '110',
   })
 }

@@ -141,6 +141,12 @@ export interface UserSettings {
   shortenCSS?:      boolean
   /** Show the side panel (Box Model) next to the overlay when locked */
   showSidePanel?:   boolean
+  /** Copy/export: include descendant (children) CSS rules. Default true. */
+  copyChildren?:    boolean
+  /** Copy/export: convert font-size rem units to px. Default false. */
+  copyFontSizePx?:  boolean
+  /** Copy/export: include the element's HTML too. Default false. */
+  copyHtml?:        boolean
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -158,6 +164,9 @@ export const DEFAULT_SETTINGS: UserSettings = {
   colorFormat:       'rgb',
   shortenCSS:        true,
   showSidePanel:     true,
+  copyChildren:      true,
+  copyFontSizePx:    false,
+  copyHtml:          false,
 }
 
 export interface StoredData {
