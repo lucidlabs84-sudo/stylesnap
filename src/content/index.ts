@@ -162,6 +162,29 @@ function formatDisplayValue(prop: string, value: string): string {
   return value
 }
 
+/**
+ * Resolve var() references to real values using :root custom properties (or the
+ * var()'s fallback). Used for pseudo/responsive blocks where getComputedStyle(el)
+ * can't give the :hover/:focus-state value. Returns the original if unresolvable.
+ */
+function resolveVars(value: string): string {
+  if (!value || !value.includes('var(')) return value
+  const root = window.getComputedStyle(document.documentElement)
+  // Replace innermost var(--name, fallback) repeatedly to handle nesting.
+  let prev = ''
+  let out = value
+  let guard = 0
+  while (out !== prev && guard++ < 10) {
+    prev = out
+    out = out.replace(/var\(\s*(--[A-Za-z0-9_-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*?))?\)/g, (full, name: string, fb?: string) => {
+      const v = root.getPropertyValue(name).trim()
+      if (v) return v
+      return fb !== undefined ? fb.trim() : full
+    })
+  }
+  return out
+}
+
 // ─── Mode icon mapping ────────────────────────────────────────────────
 // SVG / CLOSE_X now imported from ./ui
 
@@ -485,11 +508,14 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     return s
   }
 
-  // Helper: render one property as a line with color block + copy button
-  const perLineProp = (k: string, v: string) => {
+  // Helper: render one property as a line with color block + copy button.
+  // `original` is the pre-resolved var() (for pseudo/responsive); main block
+  // falls back to varOriginals[k].
+  const perLineProp = (k: string, v: string, original?: string) => {
     const displayVal = formatDisplayValue(k, v)
     const cBlock = isColorValue(v) ? colorBlock(v) : ''
-    return `<span class="ss-prop-row"><span class="ss-prop">${escapeHtml(k)}:</span> ${cBlock}<span class="ss-val" data-prop="${escapeHtml(k)}" data-original="${escapeHtml(v)}" title="${varOriginals[k] ? escapeHtml(varOriginals[k]) + ' — click to edit' : 'Click to edit'}">${escapeHtml(displayVal)}<svg class="ss-val-edit-icon" ${SVG} width="9" height="9" style="opacity:0;margin-left:3px;vertical-align:middle;transition:opacity 0.15s;flex-shrink:0;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>;<button class="ss-val-copy-btn" data-text="${escapeHtml(`${k}: ${displayVal};`)}" title="Copy"><svg ${SVG} width="9" height="9"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></span>`
+    const orig = original ?? varOriginals[k]
+    return `<span class="ss-prop-row"><span class="ss-prop">${escapeHtml(k)}:</span> ${cBlock}<span class="ss-val" data-prop="${escapeHtml(k)}" data-original="${escapeHtml(v)}" title="${orig ? escapeHtml(orig) + ' — click to edit' : 'Click to edit'}">${escapeHtml(displayVal)}<svg class="ss-val-edit-icon" ${SVG} width="9" height="9" style="opacity:0;margin-left:3px;vertical-align:middle;transition:opacity 0.15s;flex-shrink:0;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>;<button class="ss-val-copy-btn" data-text="${escapeHtml(`${k}: ${displayVal};`)}" title="Copy"><svg ${SVG} width="9" height="9"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></span>`
   }
 
   // Flat list: all properties in one block, sorted logically
@@ -525,7 +551,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       for (const [k, v] of Object.entries(props)) {
         if (v === 'initial' || v === 'inherit' || v === 'unset') continue
         if (v === 'none' && k !== 'display') continue
-        lines.push(perLineProp(k, v))
+        lines.push(perLineProp(k, resolveVars(v), v.includes('var(') ? v : undefined))
       }
       if (lines.length > 0) {
         pseudoHTML += `\n<div class="ss-section-card ss-card-pseudo"><div class="ss-section-card-header">${pseudoIcon} <span class="ss-section-card-tag">:${escapeHtml(pseudo)}</span></div><pre class="ss-css ss-flat-list">${lines.join('\n')}</pre></div>`
@@ -543,7 +569,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       for (const [k, v] of Object.entries(props)) {
         if (v === 'initial' || v === 'inherit' || v === 'unset') continue
         if (v === 'none' && k !== 'display') continue
-        lines.push(perLineProp(k, v))
+        lines.push(perLineProp(k, resolveVars(v), v.includes('var(') ? v : undefined))
       }
       if (lines.length > 0) {
         responsiveInline += `\n<div class="ss-section-card ss-card-responsive"><div class="ss-section-card-header">${respIcon} <span class="ss-section-card-tag">@media ${escapeHtml(query)}</span></div><pre class="ss-css ss-flat-list">${lines.join('\n')}</pre></div>`

@@ -1,67 +1,131 @@
-/** Design popup — page Colors + Fonts tabs. */
-import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, closeHintPopups, escapeHtml } from '../ui'
+/**
+ * Tokens panel — the page's design system in one view.
+ * Shows CSS custom properties (--tokens) grouped by kind (colors / typography /
+ * spacing / radius / shadow), and falls back to scanning computed colors & fonts
+ * so pages without CSS variables still show something useful.
+ * (Exported as showDesignPopup / panel id stylesnap-design-popup for back-compat.)
+ */
+import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, closeHintPopups, escapeHtml, isColorValue } from '../ui'
 
+interface Token { name: string; value: string }
 
-export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
-  // Toggle: if already open, close it
+/** Collect resolved :root / html custom properties (skip our own stylesheet). */
+function collectRootVars(): Token[] {
+  const names = new Set<string>()
+  for (const sheet of Array.from(document.styleSheets)) {
+    const ownerId = (sheet.ownerNode as Element | null)?.id || ''
+    if (ownerId.startsWith('stylesnap')) continue
+    let rules: CSSRuleList
+    try { rules = sheet.cssRules } catch { continue } // cross-origin
+    for (const rule of Array.from(rules)) {
+      if (rule.type !== CSSRule.STYLE_RULE) continue
+      const sr = rule as CSSStyleRule
+      const sel = sr.selectorText || ''
+      if (!/(^|,)\s*(:root|html)\s*(,|$)/.test(sel)) continue
+      for (let i = 0; i < sr.style.length; i++) {
+        const p = sr.style[i]
+        if (p.startsWith('--')) names.add(p)
+      }
+    }
+  }
+  const rootCS = window.getComputedStyle(document.documentElement)
+  const out: Token[] = []
+  for (const name of names) {
+    const value = rootCS.getPropertyValue(name).trim()
+    if (value) out.push({ name, value })
+  }
+  return out
+}
+
+type Kind = 'color' | 'font' | 'spacing' | 'radius' | 'shadow' | 'misc'
+function classify(name: string, value: string): Kind {
+  const n = name.toLowerCase()
+  if (/radius|rounded/.test(n)) return 'radius'
+  if (/shadow|elevation/.test(n)) return 'shadow'
+  if (isColorValue(value)) return 'color'
+  if (/font|family|text|leading|tracking|weight/.test(n)) return 'font'
+  if (/space|spacing|gap|size|width|height|inset|margin|padding/.test(n) && /^-?[\d.]/.test(value)) return 'spacing'
+  if (/^-?[\d.]+(px|rem|em|%|vh|vw)/.test(value)) return 'spacing'
+  return 'misc'
+}
+
+function normalizeHex(value: string): string {
+  const m = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  if (m) return '#' + [m[1], m[2], m[3]].map(x => parseInt(x).toString(16).padStart(2, '0')).join('')
+  return value.toLowerCase()
+}
+
+/** Scan computed colors across the page (fallback when there are no color tokens). */
+function scanColors(): string[] {
+  const colorMap = new Map<string, true>()
+  const props = ['color', 'background-color', 'border-top-color', 'border-bottom-color', 'border-left-color', 'border-right-color', 'outline-color', 'fill', 'stroke']
+  const all = document.querySelectorAll('*')
+  const nodes = all.length > 500 ? Array.from(all).slice(0, 500) : Array.from(all)
+  for (const node of nodes) {
+    if ((node as HTMLElement).dataset?.stylesnap) continue
+    if ((node as Element).id?.startsWith('stylesnap-')) continue
+    const cs = window.getComputedStyle(node as HTMLElement)
+    for (const p of props) {
+      const v = cs.getPropertyValue(p)
+      if (!v || v === 'rgba(0, 0, 0, 0)' || v === 'transparent') continue
+      const m = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+      if (!m) continue
+      colorMap.set('#' + [m[1], m[2], m[3]].map(x => parseInt(x).toString(16).padStart(2, '0')).join(''), true)
+    }
+  }
+  return Array.from(colorMap.keys())
+}
+
+/** Scan computed font families (fallback when there are no font tokens). */
+function scanFonts(): string[] {
+  const fonts = new Set<string>()
+  const all = document.querySelectorAll('*')
+  const nodes = all.length > 500 ? Array.from(all).slice(0, 500) : Array.from(all)
+  for (const node of nodes) {
+    if ((node as HTMLElement).dataset?.stylesnap) continue
+    if ((node as Element).id?.startsWith('stylesnap-')) continue
+    const ff = window.getComputedStyle(node as HTMLElement).fontFamily.split(',')[0].replace(/['"]/g, '').trim()
+    if (ff) fonts.add(ff)
+  }
+  return Array.from(fonts).slice(0, 12)
+}
+
+export function showDesignPopup() {
   const existing = $$('stylesnap-design-popup')
   if (existing) { existing.remove(); return }
-  // Close other hint popups (mutually exclusive)
   closeHintPopups('stylesnap-design-popup')
 
   const popup = document.createElement('div')
   popup.id = 'stylesnap-design-popup'
   popup.setAttribute('data-stylesnap', 'true')
   Object.assign(popup.style, {
-    position: 'fixed',
-    zIndex: '999994',
+    position: 'fixed', zIndex: '999994',
     background: 'var(--ss-bg-panel)',
     border: '1px solid rgba(99, 102, 241, 0.3)',
-    borderRadius: '10px',
-    width: '300px',
-    maxHeight: '480px',
-    display: 'flex',
-    flexDirection: 'column',
+    borderRadius: '10px', width: '320px', maxHeight: '480px',
+    display: 'flex', flexDirection: 'column',
     boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    fontFamily: 'system-ui, sans-serif',
-    color: '#e2e8f0',
-    fontSize: '12px',
+    fontFamily: 'system-ui, sans-serif', color: '#e2e8f0', fontSize: '12px',
   })
-
-  const chipGroupStyle = 'display:inline-flex;gap:2px;background:rgba(255,255,255,0.06);border-radius:6px;padding:2px;'
-  const tabBtn = (tab: string, label: string, active: boolean) =>
-    `<button class="ss-dpop-tab" data-tab="${tab}" style="background:${active ? 'rgba(99,102,241,0.25)' : 'none'};border:none;color:${active ? '#e2e8f0' : '#64748b'};padding:4px 12px;border-radius:4px;font-size:11px;cursor:pointer;font-family:system-ui,sans-serif;">${label}</button>`
 
   popup.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,0.06);">
-      <div style="${chipGroupStyle}">
-        ${tabBtn('colors', 'Colors', initialTab === 'colors')}
-        ${tabBtn('fonts', 'Fonts', initialTab === 'fonts')}
-      </div>
+      <span style="font-size:13px;font-weight:600;">Tokens</span>
       <button id="ss-design-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
     </div>
-    <div id="ss-dpop-colors" style="display:${initialTab === 'colors' ? 'flex' : 'none'};flex-direction:column;flex:1;min-height:0;">
-      <div style="flex:1;overflow-y:auto;padding:10px 12px 6px;" class="ss-hint-scroll">
-        <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Extracting colors…</div>
-      </div>
-      <div id="ss-dpop-color-actions" style="display:none;flex-shrink:0;padding:8px 12px;border-top:1px solid rgba(255,255,255,0.06);">
-        <div style="display:flex;gap:6px;">
-          <button id="ss-pal-copy-vars" style="flex:1;background:var(--ss-primary-bg);border:1px solid rgba(99,102,241,0.3);color:var(--ss-primary-lighter);border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy CSS Vars</button>
-          <button id="ss-pal-copy-json" style="flex:1;background:var(--ss-primary-bg);border:1px solid rgba(99,102,241,0.3);color:var(--ss-primary-lighter);border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy JSON</button>
-        </div>
-      </div>
+    <div id="ss-tok-body" class="ss-hint-scroll" style="flex:1;overflow-y:auto;padding:10px 12px;">
+      <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Extracting tokens…</div>
     </div>
-    <div id="ss-dpop-fonts" style="display:${initialTab === 'fonts' ? 'flex' : 'none'};flex-direction:column;flex:1;min-height:0;">
-      <div style="flex:1;overflow-y:auto;padding:10px 12px;" class="ss-hint-scroll">
-        <div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">Scanning fonts…</div>
-      </div>
+    <div style="flex-shrink:0;padding:8px 12px;border-top:1px solid rgba(255,255,255,0.06);display:flex;gap:6px;">
+      <button id="ss-tok-copy-vars" style="flex:1;background:var(--ss-primary-bg);border:1px solid rgba(99,102,241,0.3);color:var(--ss-primary-lighter);border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy CSS Vars</button>
+      <button id="ss-tok-copy-json" style="flex:1;background:var(--ss-primary-bg);border:1px solid rgba(99,102,241,0.3);color:var(--ss-primary-lighter);border-radius:4px;padding:5px 6px;font-size:10px;cursor:pointer;">Copy JSON</button>
     </div>
   `
   stAppend(popup)
 
-  // Position: centered below hint bar
+  // Position centered below the hint bar
   const hint = $$('stylesnap-hint-bar')
-  const pw = 300
+  const pw = 320
   if (hint) {
     const hRect = hint.getBoundingClientRect()
     const left = Math.max(8, Math.min(hRect.left + hRect.width / 2 - pw / 2, window.innerWidth - pw - 8))
@@ -73,157 +137,106 @@ export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
   }
 
   popup.querySelector('#ss-design-close')?.addEventListener('click', () => popup.remove())
-
-  // Tab switching — stopPropagation to prevent triggering closeOnOutside
-  popup.querySelectorAll('.ss-dpop-tab').forEach(btn => {
-    btn.addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      const tab = (btn as HTMLElement).dataset.tab as 'colors' | 'fonts'
-      popup.querySelectorAll('.ss-dpop-tab').forEach(b => {
-        ;(b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
-        ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#64748b'
-      })
-      ;(popup.querySelector('#ss-dpop-colors') as HTMLElement).style.display = tab === 'colors' ? 'flex' : 'none'
-      ;(popup.querySelector('#ss-dpop-fonts') as HTMLElement).style.display = tab === 'fonts' ? 'flex' : 'none'
-    })
-  })
-
-  // Click outside to close — leak-proof, auto-cleans on any removal path
   attachOutsideClose(popup, { delay: 300 })
 
-  // ── Colors tab ──────────────────────────────────────────────────────
+  // ── Extract + render (deferred so the panel paints first) ──
   setTimeout(() => {
     try {
-      // Collect colors directly via getComputedStyle — more reliable than extractDesignTokens
-      const colorMap = new Map<string, string>() // hex → original rgb string
-      const colorProps = ['color','background-color','border-top-color','border-bottom-color','border-left-color','border-right-color','outline-color','fill','stroke']
-      const allNodes = document.querySelectorAll('*')
-      const MAX_NODES = 500
-      const nodes = allNodes.length > MAX_NODES ? Array.from(allNodes).slice(0, MAX_NODES) : Array.from(allNodes)
-      nodes.forEach(node => {
-        if ((node as HTMLElement).dataset?.stylesnap) return
-        if ((node as Element).id?.startsWith('stylesnap-')) return
-        const cs = window.getComputedStyle(node as HTMLElement)
-        colorProps.forEach(p => {
-          const v = cs.getPropertyValue(p)
-          if (!v || v === 'rgba(0, 0, 0, 0)' || v === 'transparent') return
-          const m = v.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
-          if (!m) return
-          const hex = '#' + [m[1],m[2],m[3]].map(x => parseInt(x).toString(16).padStart(2,'0')).join('')
-          if (!colorMap.has(hex)) colorMap.set(hex, v)
-        })
-      })
-      // Build simple color list
-      const colors = Array.from(colorMap.entries()).map(([hex, rgb]) => ({
-        value: hex, role: 'other' as const, rgb
-      }))
-      const colorsPanel = popup.querySelector('#ss-dpop-colors') as HTMLElement
+      const vars = collectRootVars()
+      const byKind: Record<Kind, Token[]> = { color: [], font: [], spacing: [], radius: [], shadow: [], misc: [] }
+      for (const t of vars) byKind[classify(t.name, t.value)].push(t)
 
-      const scrollEl = colorsPanel.querySelector('.ss-hint-scroll') as HTMLElement
-      const actionsEl = popup.querySelector('#ss-dpop-color-actions') as HTMLElement
-      if (colors.length === 0) {
-        scrollEl.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No colors found</div>`
-      } else {
-        let paletteFmt = 'hex'
-        const hexToRgb = (hex: string) => {
-          const m = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
-          return m ? [parseInt(m[1],16), parseInt(m[2],16), parseInt(m[3],16)] as [number,number,number] : null
-        }
-        const fmtColor = (hex: string, fmt: string) => {
-          if (fmt === 'hex') return hex
-          const rgb = hexToRgb(hex)
-          if (!rgb) return hex
-          const [r,g,b] = rgb
-          if (fmt === 'rgb') return `rgb(${r}, ${g}, ${b})`
-          const rf=r/255,gf=g/255,bf=b/255,max=Math.max(rf,gf,bf),min=Math.min(rf,gf,bf),l=(max+min)/2
-          let h=0,s=0
-          if(max!==min){const d=max-min;s=l>0.5?d/(2-max-min):d/(max+min);if(max===rf)h=((gf-bf)/d+(gf<bf?6:0))/6;else if(max===gf)h=((bf-rf)/d+2)/6;else h=((rf-gf)/d+4)/6}
-          return `hsl(${Math.round(h*360)},${Math.round(s*100)}%,${Math.round(l*100)}%)`
-        }
-        const renderGrid = () => colors.map(c => {
-          const display = fmtColor(c.value, paletteFmt)
-          return `<div class="ss-design-swatch" data-hex="${c.value}" data-display="${display}" title="${display}" style="cursor:pointer;text-align:center;"><div style="width:100%;aspect-ratio:1;border-radius:6px;background:${c.value};border:1px solid rgba(255,255,255,0.1);"></div><div style="font-size:9px;color:#94a3b8;margin-top:2px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${display}</div></div>`
+      // Colors: token colors + scanned colors not already represented by a token
+      const tokenHexes = new Set(byKind.color.map(t => normalizeHex(t.value)))
+      const scannedColors = scanColors().filter(hex => !tokenHexes.has(hex))
+      const colorSwatches = [
+        ...byKind.color.map(t => ({ name: t.name, value: t.value, hex: normalizeHex(t.value) })),
+        ...scannedColors.map(hex => ({ name: '', value: hex, hex })),
+      ]
+
+      // Fonts: font tokens + scanned families
+      const fontTokens = byKind.font
+      const scannedFonts = scanFonts()
+
+      const body = popup.querySelector('#ss-tok-body') as HTMLElement
+      const sections: string[] = []
+
+      // — Colors —
+      if (colorSwatches.length) {
+        const grid = colorSwatches.map(c => {
+          const label = c.name || c.hex
+          const copyVal = c.name ? `var(${c.name})` : c.hex
+          return `<div class="ss-tok-color" data-copy="${escapeHtml(copyVal)}" title="${escapeHtml(c.name ? c.name + ' = ' + c.value : c.value)}" style="cursor:pointer;text-align:center;min-width:0;">
+            <div style="width:100%;aspect-ratio:1;border-radius:6px;background:${escapeHtml(c.value)};border:1px solid rgba(255,255,255,0.12);"></div>
+            <div style="font-size:8.5px;color:#94a3b8;margin-top:2px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(label)}</div>
+          </div>`
         }).join('')
-
-        scrollEl.innerHTML = `
-          <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">
-            <span style="font-size:10px;color:#64748b;">${colors.length} colors</span>
-            <div style="display:flex;gap:2px;background:rgba(255,255,255,0.05);border-radius:6px;padding:2px;margin-left:auto;">
-              ${['hex','rgb','hsl'].map(f => `<button class="ss-pal-fmt" data-fmt="${f}" style="background:${f==='hex'?'rgba(99,102,241,0.25)':'none'};color:${f==='hex'?'#e2e8f0':'#94a3b8'};border:none;border-radius:4px;padding:2px 6px;font-size:10px;font-family:monospace;cursor:pointer;">${f.toUpperCase()}</button>`).join('')}
-            </div>
-          </div>
-          <div id="ss-pal-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;">${renderGrid()}</div>
-        `
-        actionsEl.style.display = 'block'
-
-        const attachSwatchHandlers = () => {
-          scrollEl.querySelectorAll('.ss-design-swatch').forEach(sw => {
-            sw.addEventListener('click', () => {
-              const text = (sw as HTMLElement).dataset.display || (sw as HTMLElement).dataset.hex || ''
-              navigator.clipboard.writeText(text).then(() => showToast(`Copied ${text}`)).catch(() => {})
-            })
-          })
-        }
-        attachSwatchHandlers()
-        scrollEl.querySelectorAll('.ss-pal-fmt').forEach(btn => {
-          btn.addEventListener('click', () => {
-            paletteFmt = (btn as HTMLElement).dataset.fmt || 'hex'
-            scrollEl.querySelectorAll('.ss-pal-fmt').forEach(b => {
-              ;(b as HTMLElement).style.background = b === btn ? 'rgba(99,102,241,0.25)' : 'none'
-              ;(b as HTMLElement).style.color = b === btn ? '#e2e8f0' : '#94a3b8'
-            })
-            const grid = scrollEl.querySelector('#ss-pal-grid')
-            if (grid) { grid.innerHTML = renderGrid(); attachSwatchHandlers() }
-          })
-        })
-        popup.querySelector('#ss-pal-copy-vars')?.addEventListener('click', () => {
-          const vars = colors.map((c,i) => `  --color-${i+1}: ${c.value};`).join('\n')
-          navigator.clipboard.writeText(`:root {\n${vars}\n}`).then(() => showToast('Copied CSS variables')).catch(() => {})
-        })
-        popup.querySelector('#ss-pal-copy-json')?.addEventListener('click', () => {
-          navigator.clipboard.writeText(JSON.stringify({colors: colors.map(c => c.value)},null,2)).then(() => showToast('Copied JSON')).catch(() => {})
-        })
+        sections.push(sectionHTML('Colors', colorSwatches.length,
+          `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:6px;">${grid}</div>`))
       }
-    } catch { (popup.querySelector('#ss-dpop-colors .ss-hint-scroll') as HTMLElement).innerHTML = `<div style="padding:16px;text-align:center;color:#f87171;">Extraction failed</div>` }
-  }, 50)
 
-  // ── Fonts tab ───────────────────────────────────────────────────────
-  setTimeout(() => {
-    try {
-      const fontMap = new Map<string, {sizes: Set<string>, weights: Set<string>}>()
-      const allNodes = document.querySelectorAll('*')
-      const MAX_NODES = 500
-      const nodes = allNodes.length > MAX_NODES ? Array.from(allNodes).slice(0, MAX_NODES) : Array.from(allNodes)
-      nodes.forEach(node => {
-        if ((node as HTMLElement).dataset?.stylesnap) return
-        if (node.id?.startsWith('stylesnap-')) return
-        const cs = window.getComputedStyle(node as HTMLElement)
-        const ff = cs.fontFamily.split(',')[0].replace(/['"]/g,'').trim()
-        if (!ff) return
-        if (!fontMap.has(ff)) fontMap.set(ff, {sizes: new Set(), weights: new Set()})
-        const entry = fontMap.get(ff)!
-        entry.sizes.add(cs.fontSize)
-        entry.weights.add(cs.fontWeight)
+      // — Typography —
+      if (fontTokens.length || scannedFonts.length) {
+        const tokRows = fontTokens.map(t => kvRow(t.name, t.value)).join('')
+        const fontRows = scannedFonts.map(f => `<div class="ss-tok-row" data-copy="${escapeHtml(f)}" title="Click to copy" style="cursor:pointer;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span style="font-family:'${escapeHtml(f)}',sans-serif;font-size:13px;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f)}</span>
+          <span style="font-size:13px;color:#64748b;font-family:'${escapeHtml(f)}',sans-serif;flex-shrink:0;">Ag</span>
+        </div>`).join('')
+        sections.push(sectionHTML('Typography', fontTokens.length + scannedFonts.length, tokRows + fontRows))
+      }
+
+      // — Spacing / Radius / Shadow (vars only) —
+      if (byKind.spacing.length) sections.push(sectionHTML('Spacing', byKind.spacing.length, byKind.spacing.map(t => kvRow(t.name, t.value)).join('')))
+      if (byKind.radius.length) sections.push(sectionHTML('Radius', byKind.radius.length, byKind.radius.map(t => kvRow(t.name, t.value)).join('')))
+      if (byKind.shadow.length) sections.push(sectionHTML('Shadow', byKind.shadow.length, byKind.shadow.map(t => kvRow(t.name, t.value)).join('')))
+      if (byKind.misc.length) sections.push(sectionHTML('Other', byKind.misc.length, byKind.misc.map(t => kvRow(t.name, t.value)).join('')))
+
+      body.innerHTML = sections.length
+        ? sections.join('')
+        : `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No tokens or colors found</div>`
+
+      // Click-to-copy for swatches & rows
+      body.querySelectorAll<HTMLElement>('[data-copy]').forEach(el => {
+        el.addEventListener('click', () => {
+          const text = el.dataset.copy || ''
+          navigator.clipboard.writeText(text).then(() => showToast(`Copied ${text}`)).catch(() => {})
+        })
       })
-      const fontsScroll = popup.querySelector('#ss-dpop-fonts .ss-hint-scroll') as HTMLElement
-      if (fontMap.size === 0) {
-        fontsScroll.innerHTML = `<div style="padding:16px;text-align:center;color:#94a3b8;font-size:11px;">No fonts found</div>`
-        return
-      }
-      const rows = Array.from(fontMap.entries()).map(([family, data]) => {
-        const sizes = Array.from(data.sizes).sort((a,b) => parseFloat(a)-parseFloat(b)).slice(0,6).join(', ')
-        const weights = Array.from(data.weights).sort((a,b) => +a - +b).join(', ')
-        const safeFamily = escapeHtml(family)
-        return `<div style="margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);">
-          <div style="font-weight:600;font-size:12px;color:#e2e8f0;margin-bottom:4px;">${safeFamily}</div>
-          <div style="font-size:10px;color:#94a3b8;">Sizes: ${sizes}</div>
-          <div style="font-size:10px;color:#94a3b8;">Weights: ${weights}</div>
-          <div style="margin-top:4px;font-family:'${safeFamily}',sans-serif;font-size:13px;color:#cbd5e1;">The quick brown fox</div>
-        </div>`
-      }).join('')
-      fontsScroll.innerHTML = `<div style="font-size:10px;color:#64748b;margin-bottom:8px;">${fontMap.size} font families</div>${rows}`
-    } catch { /* noop */ }
-  }, 80)
+
+      // Footer: copy all
+      const allTokens = [...byKind.color, ...byKind.font, ...byKind.spacing, ...byKind.radius, ...byKind.shadow, ...byKind.misc]
+      popup.querySelector('#ss-tok-copy-vars')?.addEventListener('click', () => {
+        const lines = allTokens.length
+          ? allTokens.map(t => `  ${t.name}: ${t.value};`)
+          : colorSwatches.map((c, i) => `  --color-${i + 1}: ${c.value};`)
+        navigator.clipboard.writeText(`:root {\n${lines.join('\n')}\n}`).then(() => showToast('Copied CSS variables')).catch(() => {})
+      })
+      popup.querySelector('#ss-tok-copy-json')?.addEventListener('click', () => {
+        const obj = allTokens.length
+          ? Object.fromEntries(allTokens.map(t => [t.name, t.value]))
+          : { colors: colorSwatches.map(c => c.value) }
+        navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => showToast('Copied JSON')).catch(() => {})
+      })
+    } catch {
+      const body = popup.querySelector('#ss-tok-body') as HTMLElement
+      if (body) body.innerHTML = `<div style="padding:16px;text-align:center;color:#f87171;">Extraction failed</div>`
+    }
+  }, 50)
 }
 
+function sectionHTML(title: string, count: number, inner: string): string {
+  return `<div style="margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+      <span style="font-size:10px;font-weight:600;color:#64748b;letter-spacing:0.05em;text-transform:uppercase;">${title}</span>
+      <span style="font-size:9px;color:#475569;">${count}</span>
+    </div>
+    ${inner}
+  </div>`
+}
 
+function kvRow(name: string, value: string): string {
+  return `<div class="ss-tok-row" data-copy="${escapeHtml(`var(${name})`)}" title="${escapeHtml(name + ' = ' + value)}" style="cursor:pointer;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:space-between;gap:8px;font-family:monospace;font-size:10px;">
+    <span style="color:var(--ss-primary-lighter);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</span>
+    <span style="color:#94a3b8;flex-shrink:0;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(value)}</span>
+  </div>`
+}
