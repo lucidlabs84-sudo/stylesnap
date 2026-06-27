@@ -53,21 +53,12 @@ export async function initFloatingButton() {
     let initialRight = 24, initialBottom = 24
     let posCustomized = false  // F6: only persist position once the user has actually moved it
 
-    chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
-      const pos = res.stylesnap_btn_pos
-      // Only honor a stored position if it's a sane, on-screen value — a stale or
-      // corrupt value would otherwise push the button far from the corner.
-      const padding = 10, btnSize = 44
-      const maxR = window.innerWidth - btnSize - padding
-      const maxB = window.innerHeight - btnSize - padding
-      if (pos && typeof pos.right === 'number' && typeof pos.bottom === 'number'
-          && pos.right >= 0 && pos.bottom >= 0 && pos.right <= maxR && pos.bottom <= maxB) {
-        posCustomized = true
-        btn.style.setProperty('right', `${pos.right}px`, 'important')
-        btn.style.setProperty('bottom', `${pos.bottom}px`, 'important')
-      }
-      // else: keep the default bottom-right (24/24) from SHADOW_FLOATING_BTN_CSS
-    })
+    // Always start at the default bottom-right corner (24/24 from
+    // SHADOW_FLOATING_BTN_CSS). Persisting the dragged position kept resurrecting
+    // a stale center-ish value from an earlier resize-persist bug and parking the
+    // ball in the user's way. A reliable out-of-the-way corner beats remembering a
+    // custom spot. Drag still works within the session; just clear stale storage.
+    chrome.storage.local.remove('stylesnap_btn_pos')
 
     // Window-level drag listeners are added only for the duration of a drag
     // (mousedown→mouseup) so they never accumulate across re-inits. (F1)

@@ -1,5 +1,5 @@
 /** Inspection history panel (session list of locked elements). */
-import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, closeHintPopups } from '../ui'
+import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, closeHintPopups, escapeHtml } from '../ui'
 import { S } from '../state'
 import { parseElement } from '@/lib/css-extractor'
 import { lockElement, unlockElement, showOverlay } from '../index'
@@ -54,7 +54,7 @@ export function showHistoryPanel() {
           <span style="font-weight:600;font-size:11px;color:var(--ss-primary-lighter);">&lt;${item.tag}&gt;</span>
           <span style="font-size:10px;color:#64748b;">${timeAgo(item.timestamp)}</span>
         </div>
-        <div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.selector}</div>
+        <div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.selector)}</div>
         <div style="font-size:9px;color:#475569;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:monospace;">${item.snippet.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
       </div>`).join('')
   }

@@ -34,17 +34,13 @@ export async function detectFromIP(): Promise<Language | null> {
   }
 }
 
-/** Detect language with full priority chain */
+/**
+ * The UI is English-only (the bilingual path was retired — maintaining two full
+ * translations across an actively-changing dev-tool UI wasn't worth it, and a
+ * partial zh path produced a mixed CN/EN interface). Kept async + the zh tables
+ * intact so re-enabling later is a one-line change.
+ */
 export async function detectLang(): Promise<Language> {
-  // 1. Check saved preference
-  const stored = await chrome.storage.local.get(['language'])
-  if (stored.language === 'zh' || stored.language === 'en') return stored.language
-
-  // 2. Browser language
-  const browser = detectFromBrowser()
-  if (browser) return browser
-
-  // 3. Fallback
   return 'en'
 }
 

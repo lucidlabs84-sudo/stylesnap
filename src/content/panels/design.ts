@@ -1,5 +1,5 @@
 /** Design popup — page Colors + Fonts tabs. */
-import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, closeHintPopups } from '../ui'
+import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, closeHintPopups, escapeHtml } from '../ui'
 
 
 export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
@@ -213,11 +213,12 @@ export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
       const rows = Array.from(fontMap.entries()).map(([family, data]) => {
         const sizes = Array.from(data.sizes).sort((a,b) => parseFloat(a)-parseFloat(b)).slice(0,6).join(', ')
         const weights = Array.from(data.weights).sort((a,b) => +a - +b).join(', ')
+        const safeFamily = escapeHtml(family)
         return `<div style="margin-bottom:10px;padding:8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.06);">
-          <div style="font-weight:600;font-size:12px;color:#e2e8f0;margin-bottom:4px;">${family}</div>
+          <div style="font-weight:600;font-size:12px;color:#e2e8f0;margin-bottom:4px;">${safeFamily}</div>
           <div style="font-size:10px;color:#94a3b8;">Sizes: ${sizes}</div>
           <div style="font-size:10px;color:#94a3b8;">Weights: ${weights}</div>
-          <div style="margin-top:4px;font-family:${family};font-size:13px;color:#cbd5e1;">The quick brown fox</div>
+          <div style="margin-top:4px;font-family:'${safeFamily}',sans-serif;font-size:13px;color:#cbd5e1;">The quick brown fox</div>
         </div>`
       }).join('')
       fontsScroll.innerHTML = `<div style="font-size:10px;color:#64748b;margin-bottom:8px;">${fontMap.size} font families</div>${rows}`

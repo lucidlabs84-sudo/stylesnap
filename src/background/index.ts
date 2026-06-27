@@ -17,8 +17,8 @@ chrome.action.onClicked.addListener((tab) => {
 
 // Set up context menu and welcome notification on install
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
-    .catch(console.error)
+  // (native side-panel was removed — the tool is hover-only now; the toolbar
+  // click is handled by chrome.action.onClicked above.)
 
   // Right-click toolbar icon → Settings
   chrome.contextMenus.create({

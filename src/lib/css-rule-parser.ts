@@ -31,6 +31,12 @@ export function parseCSSRules(el: Element): ExtractedCSSRules {
   }
 
   for (const sheet of document.styleSheets) {
+    // Skip StyleSnap's own injected stylesheet — otherwise its .stylesnap-locked /
+    // .stylesnap-highlight rules (outline, cursor:crosshair, background) get matched
+    // to the inspected element and pollute the captured/copied CSS.
+    const ownerId = (sheet.ownerNode as Element | null)?.id || ''
+    if (ownerId.startsWith('stylesnap')) continue
+
     // Check if the stylesheet is accessible (handle CORS)
     if (!canAccessSheet(sheet)) {
       result.crossOriginWarning = true

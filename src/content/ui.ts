@@ -165,7 +165,7 @@ export function h(tag: string, props: HProps = {}, ...children: HChild[]): HTMLE
 
 /** Close all hint-bar popups except the one with the given id (mutual exclusion). */
 export function closeHintPopups(exceptId?: string) {
-  ['stylesnap-design-popup', 'stylesnap-history-popup', 'stylesnap-settings-popup'].forEach(id => {
+  ['stylesnap-design-popup', 'stylesnap-history-popup', 'stylesnap-settings-popup', 'stylesnap-ai-prompt-panel'].forEach(id => {
     if (id !== exceptId) $$(id)?.remove()
   })
 }

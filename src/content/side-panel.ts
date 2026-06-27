@@ -102,11 +102,17 @@ export function updateSidePanel(el: HTMLElement, overlay: HTMLElement) {
 
 function positionSidePanel(panel: HTMLElement, overlay: HTMLElement) {
   const ovRect = overlay.getBoundingClientRect()
-  const panelWidth = 220, gap = 8
+  const gap = 8, pad = 8
+  const panelWidth = panel.offsetWidth || 220
+  const panelHeight = panel.offsetHeight || 160
+  // Prefer the right of the overlay; flip to the left if it would overflow;
+  // then clamp fully on-screen either way.
   let left = ovRect.right + gap
-  if (left + panelWidth > window.innerWidth - 8) left = ovRect.left - panelWidth - gap
-  left = Math.max(8, left)
-  const top = Math.max(8, Math.min(ovRect.top, window.innerHeight - 360))
+  if (left + panelWidth > window.innerWidth - pad) left = ovRect.left - panelWidth - gap
+  left = Math.max(pad, Math.min(left, window.innerWidth - panelWidth - pad))
+  // Align the panel's top with the overlay; clamp using the panel's REAL height
+  // (was a stale fixed 360 that pushed it up and misaligned it).
+  const top = Math.max(pad, Math.min(ovRect.top, window.innerHeight - panelHeight - pad))
   panel.style.left = `${Math.round(left)}px`
   panel.style.top = `${Math.round(top)}px`
 }

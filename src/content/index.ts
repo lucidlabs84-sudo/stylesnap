@@ -66,7 +66,10 @@ function reloadFormatSettings() {
     S.showSidePanel = s.showSidePanel !== false
     _showTW = s.showTailwindOverlay !== false
     _overlaySide = s.overlaySide === 'left' ? 'left' : 'right'
-    // Re-render the current overlay so settings apply in real time
+    // NOTE: assist mode is applied in storage.onChanged (only when it actually
+    // changed) — applying it here would fight the G-key/live mode cycling, whose
+    // setInspectMode writes also trigger this reload.
+    // Re-render the current overlay so other settings apply in real time
     rerenderOverlay()
   })
 }
@@ -144,8 +147,12 @@ function shortenValue(_prop: string, value: string): string {
     if (n === Math.round(n)) return `${n}${u}`
     return `${parseFloat(n.toFixed(2))}${u}`
   }
-  // Color: rgb → hex → shorten hex
-  if (isColorValue(value)) return shortenColor(convertColor(value, 'hex'))
+  // Color: honor the user's color-format setting (was hardcoded to hex, which
+  // made the RGB/HSL setting do nothing whenever Shorten CSS was on — the default).
+  if (isColorValue(value)) {
+    const c = convertColor(value, _colorFormat)
+    return _colorFormat === 'hex' ? shortenColor(c) : c
+  }
   return value
 }
 
@@ -410,9 +417,7 @@ function getOrCreateOverlay(): HTMLElement {
     overlay.style.setProperty('position', 'fixed', 'important')
     overlay.style.setProperty('top', '0', 'important')
     overlay.style.setProperty('left', '0', 'important')
-    chrome.storage.local.get(['language'], (res) => {
-      overlay!.setAttribute('data-lang', res.language || 'en')
-    })
+    overlay.setAttribute('data-lang', 'en')  // UI is English-only
     stAppend(overlay)
   }
   return overlay
@@ -586,18 +591,28 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const updatePosition = () => {
     computePosition(el, overlay, {
       strategy: 'fixed',
-      // overlaySide controls which corner the overlay anchors to
-      placement: _overlaySide === 'left' ? 'bottom-end' : 'bottom-start',
+      // overlaySide controls which corner the overlay anchors to.
+      // left → align to the element's left edge (bottom-start);
+      // right → align to the element's right edge (bottom-end).
+      placement: _overlaySide === 'left' ? 'bottom-start' : 'bottom-end',
       middleware: [
         offset(4),
-        flip({ fallbackPlacements: _overlaySide === 'left' ? ['top-end', 'left-start', 'right-start'] : ['top-start', 'right-start', 'left-start'] }),
+        flip({ fallbackPlacements: _overlaySide === 'left' ? ['top-start', 'right-start', 'left-start'] : ['top-end', 'left-start', 'right-start'] }),
         shift({ padding: 8 }),
       ],
     }).then(({ x, y }) => {
       // Discard if a newer showOverlay call has happened
       if (gen !== S.overlayGen) return
-      overlay.style.setProperty('left', `${Math.round(x)}px`, 'important')
-      overlay.style.setProperty('top', `${Math.round(y)}px`, 'important')
+      // Clamp into the viewport: flip()+shift() don't constrain the main axis, so
+      // a huge locked element (e.g. a full-page container) can push the overlay
+      // off the top/edge. Clamp using the overlay's real size.
+      const pad = 8
+      const ow = overlay.offsetWidth || 0
+      const oh = overlay.offsetHeight || 0
+      const cx = Math.max(pad, Math.min(x, window.innerWidth - ow - pad))
+      const cy = Math.max(pad, Math.min(y, window.innerHeight - oh - pad))
+      overlay.style.setProperty('left', `${Math.round(cx)}px`, 'important')
+      overlay.style.setProperty('top', `${Math.round(cy)}px`, 'important')
       // Keep guides anchored to the element on scroll/resize too
       if (S.lockedElement) {
         refreshGuides(S.lastHighlighted)  // keep lock + hover sets following on scroll
@@ -965,7 +980,7 @@ function getComponentCSS(el: Element): ComponentCSS {
     const owner = sheet.ownerNode as HTMLElement | null
     if (owner?.tagName !== 'STYLE') continue
     try {
-      const text = owner.textContent.replace(/\/\*[\s\S]*?\*\//g, '')
+      const text = (owner.textContent || '').replace(/\/\*[\s\S]*?\*\//g, '')
       let pos = 0
       while (pos < text.length) {
         while (pos < text.length && /\s/.test(text[pos])) pos++
@@ -1401,13 +1416,18 @@ function getComponentCSSForExport(el: Element): string {
     else otherSelectors.push(sel)
   }
 
-  // Main element block: merge all exact selectors + computed fallback
-  if (elSelectors.length > 0 || Object.keys(computedFallback).length > 0) {
+  // Main element block — use the SAME source as Copy CSS (S.lastParsedCSS, via
+  // formatCSS) so the inspected element's rule is byte-identical in both. The
+  // descendant / pseudo / media rules below are appended only so the component
+  // still renders in CodePen.
+  if (S.lastParsedCSS && S.lastParsedCSS.styles && Object.keys(S.lastParsedCSS.styles).length > 0) {
+    cssLines.push(formatCSS(S.lastParsedCSS.styles, S.lastParsedCSS.selector))
+  } else if (elSelectors.length > 0 || Object.keys(computedFallback).length > 0) {
+    // Fallback (no cached parse): original component-derived main block.
     const mainProps: Record<string, string> = { ...computedFallback }
     for (const sel of elSelectors) {
       Object.assign(mainProps, resolveProps(el, rules.get(sel)!))
     }
-    // Use the most specific selector for the element
     const bestSelector = elSelectors.length > 0
       ? elSelectors.reduce((a, b) => a.length > b.length ? a : b)
       : el.id ? `#${el.id}`
@@ -1496,16 +1516,17 @@ export function onExecute(_args: { perf: { injectTime: number; loadTime: number 
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local') {
-    if (changes.language) {
-      const lang = changes.language.newValue
-      const overlay = $$(OVERLAY_ID)
-      if (overlay) overlay.setAttribute('data-lang', lang || 'en')
-    }
-
     if (changes.stylesnap_settings) {
       const newSettings = changes.stylesnap_settings.newValue
+      const oldSettings = changes.stylesnap_settings.oldValue
       if (newSettings) {
         reloadFormatSettings()
+        // Apply assist mode ONLY when it actually changed (so this doesn't fight
+        // setInspectMode's own writes from G-key cycling). assist 0/1/2 → mode 1/2/3.
+        const newAssist = newSettings.assistMode ?? 1
+        if (oldSettings && newAssist !== (oldSettings.assistMode ?? 1) && S.inspectMode > 0) {
+          setInspectMode(newAssist + 1)
+        }
         // Handle floating button visibility toggle
         if (newSettings.showFloatingBtn !== undefined) {
           const btn = $$(FLOATING_BTN_ID)

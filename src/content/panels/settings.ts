@@ -123,7 +123,7 @@ export async function showSettingsPopup() {
 
   popup.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <span style="display:flex;align-items:center;font-weight:600;font-size:13px;">${iconSlider} Settings</span>
+      <span style="display:flex;align-items:center;font-weight:600;font-size:13px;">${iconSlider} ${t.settings}</span>
       <div style="display:flex;align-items:center;gap:2px;">
         <button id="ss-btn-feedback" title="Feedback" style="background:none;border:none;color:var(--ss-primary-light);cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;transition:color 0.15s;">${iconMail}</button>
         <button id="ss-settings-close" style="background:none;border:none;color:#64748b;cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;">${CLOSE_X}</button>
@@ -261,6 +261,7 @@ export async function showSettingsPopup() {
   bindChipGroup('ss-pref-overlay-side')
   bindChipGroup('ss-pref-assist-mode')
   bindChipGroup('ss-pref-color-format')
+
   // Close
   popup.querySelector('#ss-settings-close')?.addEventListener('click', close)
 

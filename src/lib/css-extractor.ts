@@ -101,6 +101,11 @@ const BROWSER_DEFAULTS: CSSPropertyMap = {
  * Extract computed CSS from an element, filtering browser defaults
  */
 export function extractComputedCSS(el: Element): CSSPropertyMap {
+  // Temporarily strip StyleSnap's own marker classes so their injected styles
+  // (outline / cursor:crosshair / background highlight) don't leak into the
+  // captured computed CSS. Synchronous remove→read→restore = no visible flash.
+  const stripped = Array.from(el.classList).filter(c => c.startsWith('stylesnap-'))
+  if (stripped.length) el.classList.remove(...stripped)
   const computed = window.getComputedStyle(el)
   const result: CSSPropertyMap = {}
 
@@ -113,6 +118,7 @@ export function extractComputedCSS(el: Element): CSSPropertyMap {
     result[prop] = value
   }
 
+  if (stripped.length) el.classList.add(...stripped)
   return result
 }
 
