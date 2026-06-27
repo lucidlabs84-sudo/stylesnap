@@ -86,28 +86,11 @@
    Assist Modes
    ═══════════════════════════════════════════════════════════ */
 
-body.stylesnap-mode-grid *:not([data-stylesnap="true"]):not([data-stylesnap="true"] *) {
-  outline: 1px solid rgba(147, 51, 234, 0.2) !important;
-}
-body.stylesnap-mode-grid *:not([data-stylesnap="true"]):not([data-stylesnap="true"] *):hover {
-  outline: 1px solid rgba(147, 51, 234, 0.6) !important;
-  background-color: rgba(147, 51, 234, 0.05) !important;
-}
+/* Guide lines are now self-contained in the shadow root (see initGuides),
+   fully inline-styled + JS-driven. No global guide CSS needed.
 
-.stylesnap-guide {
-  position: fixed;
-  background-color: rgba(99, 102, 241, 0.65);
-  z-index: var(--ss-z-float);
-  pointer-events: none;
-  display: none;
-}
-body.stylesnap-mode-guidelines .stylesnap-guide {
-  display: block;
-}
-/* Horizontal crosshair: full viewport width, positioned at element center Y */
-#stylesnap-guide-h { left: 0; right: 0; height: 1px; }
-/* Vertical crosshair: full viewport height, positioned at element center X */
-#stylesnap-guide-v { top: 0; bottom: 0; width: 1px; }
+   Grid-mode outlines are injected via PAGE_CSS to the page <head>,
+   not here — body.* selectors in Shadow DOM would not match page elements. */
 
 
 /* ═══════════════════════════════════════════════════════════
@@ -367,12 +350,14 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
 #stylesnap-overlay .ss-val {
   color: var(--ss-accent-orange);
   cursor: text;
-  border-bottom: 1px dashed transparent;
+  /* Faint persistent dashed underline = "this value is editable" affordance,
+     so users discover inline editing without having to hover first. */
+  border-bottom: 1px dashed rgba(251, 146, 60, 0.35);
   transition: background var(--ss-transition), border-color var(--ss-transition);
 }
 #stylesnap-overlay .ss-val:hover {
-  background: rgba(251, 146, 60, 0.1);
-  border-bottom-color: rgba(251, 146, 60, 0.3);
+  background: rgba(251, 146, 60, 0.12);
+  border-bottom-color: rgba(251, 146, 60, 0.7);
 }
 #stylesnap-overlay .ss-val[contenteditable="true"] {
   background: rgba(99, 102, 241, 0.15);
@@ -381,19 +366,6 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   color: var(--ss-text);
   min-width: 20px;
   display: inline-block;
-}
-
-/* ── Compare diff ── */
-#stylesnap-overlay .ss-val-diff {
-  background: var(--ss-warning-bg) !important;
-  color: var(--ss-warning) !important;
-  border-radius: 2px;
-  padding: 1px 3px;
-}
-#stylesnap-overlay .ss-val-diff::after {
-  content: ' → ' attr(data-compare);
-  color: #f87171;
-  font-weight: 700;
 }
 
 /* ── Sections ── */
@@ -657,61 +629,61 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
   pointer-events: auto !important;
 }
 #stylesnap-overlay .ss-actions { display: flex; align-items: center; gap: var(--ss-space-xs); }
-#stylesnap-overlay .ss-copy-btn,
+
+/* Primary action — Copy CSS. Solid fill, bolder, slightly larger: the one
+   thing most users came for. Everything else recedes to ghost buttons. */
+#stylesnap-overlay .ss-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-xs);
+  font-size: var(--ss-font-xs);
+  font-weight: 600;
+  color: #fff;
+  background: var(--ss-primary);
+  border: 1px solid var(--ss-primary);
+  border-radius: var(--ss-radius-md);
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: var(--ss-font-sans);
+  transition: background var(--ss-transition), border-color var(--ss-transition);
+}
+#stylesnap-overlay .ss-copy-btn:hover {
+  background: var(--ss-primary-light);
+  border-color: var(--ss-primary-light);
+}
+
+/* Secondary actions — TW / Prompt / CodePen. Ghost style so they don't
+   compete with the primary; each reveals its accent colour only on hover. */
+#stylesnap-overlay .ss-tw-copy-btn,
+#stylesnap-overlay .ss-ai-btn,
 #stylesnap-overlay .ss-export-btn {
   display: flex;
   align-items: center;
   gap: var(--ss-space-xs);
   font-size: var(--ss-font-xs);
-  color: var(--ss-primary-lighter);
-  background: rgba(99, 102, 241, 0.18);
-  border: 1px solid rgba(99, 102, 241, 0.38);
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid var(--ss-border-subtle);
   border-radius: var(--ss-radius-md);
   padding: 3px 8px;
   cursor: pointer;
   font-family: var(--ss-font-sans);
-  transition: background var(--ss-transition);
-}
-#stylesnap-overlay .ss-copy-btn:hover,
-#stylesnap-overlay .ss-export-btn:hover {
-  background: rgba(99, 102, 241, 0.3);
-}
-
-#stylesnap-overlay .ss-ai-btn {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-xs);
-  font-size: var(--ss-font-xs);
-  color: #c4b5fd;
-  background: rgba(167, 139, 250, 0.18);
-  border: 1px solid rgba(167, 139, 250, 0.38);
-  border-radius: var(--ss-radius-md);
-  padding: 3px 8px;
-  cursor: pointer;
-  font-family: var(--ss-font-sans);
-  transition: background var(--ss-transition);
-}
-#stylesnap-overlay .ss-ai-btn:hover {
-  background: rgba(167, 139, 250, 0.32);
-  border-color: rgba(167, 139, 250, 0.4);
-}
-
-#stylesnap-overlay .ss-tw-copy-btn {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-xs);
-  font-size: var(--ss-font-xs);
-  color: #67e8f9;
-  background: rgba(6, 182, 212, 0.12);
-  border: 1px solid rgba(6, 182, 212, 0.3);
-  border-radius: var(--ss-radius-md);
-  padding: 3px 8px;
-  cursor: pointer;
-  font-family: var(--ss-font-sans);
-  transition: background var(--ss-transition), opacity var(--ss-transition);
+  transition: color var(--ss-transition), background var(--ss-transition), border-color var(--ss-transition), opacity var(--ss-transition);
 }
 #stylesnap-overlay .ss-tw-copy-btn:hover {
-  background: rgba(6, 182, 212, 0.22);
+  color: #67e8f9;
+  background: rgba(6, 182, 212, 0.12);
+  border-color: rgba(6, 182, 212, 0.4);
+}
+#stylesnap-overlay .ss-ai-btn:hover {
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.16);
+  border-color: rgba(167, 139, 250, 0.4);
+}
+#stylesnap-overlay .ss-export-btn:hover {
+  color: var(--ss-primary-lighter);
+  background: var(--ss-primary-bg);
+  border-color: var(--ss-primary-border);
 }
 
 
@@ -826,27 +798,9 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
 /* ═══════════════════════════════════════════════════════════
    Element Highlights
    ═══════════════════════════════════════════════════════════ */
-
-.stylesnap-highlight {
-  outline: 2px solid rgba(99, 102, 241, 0.9) !important;
-  outline-offset: 1px !important;
-  background-color: rgba(99, 102, 241, 0.04) !important;
-  cursor: crosshair !important;
-}
-
-.stylesnap-preview {
-  outline: 2px dashed rgba(168, 85, 247, 0.8) !important;
-  outline-offset: 1px !important;
-  background-color: rgba(168, 85, 247, 0.03) !important;
-  cursor: pointer !important;
-}
-
-.stylesnap-locked {
-  outline: 2px solid rgba(16, 185, 129, 0.9) !important;
-  outline-offset: 1px !important;
-  background-color: rgba(16, 185, 129, 0.04) !important;
-  cursor: crosshair !important;
-}
+/* .stylesnap-highlight / .stylesnap-preview / .stylesnap-locked
+   are injected via PAGE_CSS to the page <head> (see index.ts).
+   Shadow DOM copies would never match page elements. */
 
 
 /* ═══════════════════════════════════════════════════════════
@@ -968,35 +922,56 @@ body.stylesnap-mode-guidelines .stylesnap-guide {
 }
 
 /* ─── Side Panel: Box Model ─────────────────────────────────────────── */
-.ss-boxmodel { font-family: var(--ss-font-mono, monospace); font-size: 10px; }
+
+.ss-boxmodel { font-family: var(--ss-font-mono, monospace); font-size: 9px; }
+
+/* Shared horizontal row: lvalue | box | rvalue */
+.ss-bm-mid-row {
+  display: flex; align-items: center; gap: 3px;
+}
+/* Labels above/below a layer */
+.ss-bm-edge-top-bot {
+  text-align: center; color: #94a3b8; font-size: 9px; line-height: 1.2;
+}
+/* Side labels (left/right) */
+.ss-bm-edge-side {
+  color: #94a3b8; font-size: 9px; line-height: 1; white-space: nowrap; flex: none;
+}
+
+/* Nested layers — each fills its parent width, flex:1 in mid-row */
 .ss-bm-margin {
   background: rgba(251, 191, 36, 0.12);
   border: 1px dashed rgba(251, 191, 36, 0.4);
-  border-radius: 4px; padding: 14px 8px; text-align: center; position: relative;
+  border-radius: 4px; padding: 6px; display: flex; flex-direction: column; gap: 2px; flex: 1;
 }
 .ss-bm-border {
   background: rgba(96, 165, 250, 0.12);
   border: 1px dashed rgba(96, 165, 250, 0.4);
-  border-radius: 4px; padding: 14px 8px; margin-top: 4px; position: relative;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 4px; padding: 6px; display: flex; flex-direction: column; gap: 2px; flex: 1;
 }
 .ss-bm-padding {
   background: rgba(52, 211, 153, 0.12);
   border: 1px dashed rgba(52, 211, 153, 0.4);
-  border-radius: 4px; padding: 14px 10px; position: relative; flex: 1;
+  border-radius: 4px; padding: 6px; display: flex; flex-direction: column; gap: 2px; flex: 1;
 }
 .ss-bm-content {
   background: rgba(99, 102, 241, 0.2);
   border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 3px; padding: 8px 6px; color: #c7d2fe; font-weight: 600;
+  border-radius: 3px; padding: 6px; color: #c7d2fe; font-weight: 600;
   text-align: center; white-space: nowrap;
 }
-.ss-bm-val { color: #94a3b8; font-size: 9px; line-height: 1; }
-.ss-bm-left, .ss-bm-right { align-self: center; }
-.ss-bm-top, .ss-bm-bot { display: block; text-align: center; }
 .ss-bm-edge-labels {
-  display: flex; justify-content: space-between; margin-top: 6px; font-size: 9px;
+  display: flex; justify-content: space-between; margin-top: 6px;
+  font-size: 8px; color: #64748b; gap: 4px;
+  font-family: var(--ss-font-mono, monospace);
 }
+
+/* ─── History Popup scrollbar ───────────────────────────────────────── */
+#stylesnap-history-popup { scrollbar-width: thin; scrollbar-color: rgba(99,102,241,0.25) transparent; }
+#stylesnap-history-popup::-webkit-scrollbar { width: 5px; height: 5px; }
+#stylesnap-history-popup::-webkit-scrollbar-track { background: transparent; }
+#stylesnap-history-popup::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.25); border-radius: 3px; }
+#stylesnap-history-popup::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.45); }
 
 /* ─── Side Panel: collapsible scrollbar consistency ─────────────────── */
 #stylesnap-side-panel ::-webkit-scrollbar { width: 5px; height: 5px; }

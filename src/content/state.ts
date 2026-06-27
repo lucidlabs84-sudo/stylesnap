@@ -23,7 +23,6 @@ export const S = {
   lastMode: 0,
   lastHighlighted: null as Element | null,
   lockedElement: null as Element | null,
-  compareMode: false,
   licenseIsPro: false,
   lastParsedCSS: null as ParsedCSS | null,
   /** Floating UI autoUpdate cleanup */
@@ -31,13 +30,13 @@ export const S = {
   /** generation counter to discard stale position updates */
   overlayGen: 0,
   history: [] as HistoryItem[],
-  /** show the Box Model + Preview side panel (mirrors settings.showSidePanel) */
+  /** show the Box Model side panel next to the overlay when locked */
   showSidePanel: true,
 }
 
 // ─── Cross-module DOM id / class constants ────────────────────────────
 // derived helpers
-export const isActive = () => S.inspectMode > 0 && !$$('stylesnap-settings-popup') && !$$('stylesnap-design-popup')
+export const isActive = () => S.inspectMode > 0 && !$$('stylesnap-settings-popup') && !$$('stylesnap-design-popup') && !$$('stylesnap-history-popup')
 export const assistMode = () => (S.inspectMode >= 2 ? S.inspectMode - 1 : 0) // 0=off, 1=lines, 2=grid
 
 export const OVERLAY_ID = 'stylesnap-overlay'

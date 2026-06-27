@@ -4,7 +4,24 @@
  * element highlighting, and design token scanning.
  */
 
-import './overlay.css'
+// Page-level CSS — absolute minimum rules that must apply to page elements
+// (highlights, grid, guides). Everything else lives in Shadow DOM via ui.ts.
+const PAGE_CSS = `
+.stylesnap-highlight{outline:2px solid rgba(99,102,241,.9)!important;outline-offset:1px!important;background-color:rgba(99,102,241,.04)!important;cursor:crosshair!important}
+.stylesnap-preview{outline:2px dashed rgba(168,85,247,.8)!important;outline-offset:1px!important;background-color:rgba(168,85,247,.03)!important;cursor:pointer!important}
+.stylesnap-locked{outline:2px solid rgba(16,185,129,.9)!important;outline-offset:1px!important;background-color:rgba(16,185,129,.04)!important;cursor:crosshair!important}
+.stylesnap-guide{position:fixed;background-color:rgba(99,102,241,.65);z-index:999990;pointer-events:none;display:none}
+body.stylesnap-mode-guidelines .stylesnap-guide{display:block}
+#stylesnap-guide-h{left:0;right:0;height:1px}
+#stylesnap-guide-v{top:0;bottom:0;width:1px}
+body.stylesnap-mode-grid *:not([data-stylesnap=true]):not([data-stylesnap=true] *){outline:1px solid rgba(147,51,234,.2)!important}
+body.stylesnap-mode-grid *:not([data-stylesnap=true]):not([data-stylesnap=true] *):hover{outline:1px solid rgba(147,51,234,.6)!important;background-color:rgba(147,51,234,.05)!important}
+`
+const _pageStyle = document.createElement('style')
+_pageStyle.id = 'stylesnap-page-css'
+_pageStyle.textContent = PAGE_CSS
+if (document.head) { document.head.appendChild(_pageStyle) }
+else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { document.head.appendChild(_pageStyle) }, { once: true }) }
 
 import { parseElement, extractComponentHTML, extractComponentCSS, formatCSS } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
@@ -14,15 +31,13 @@ import {
   isColorValue, escapeHtml, classNameOf, colorBlock,
   SVG, showToast,
 } from './ui'
-import { mapCSSToTailwind, getTailwindClasses } from './tailwind'
+import { getTailwindClasses } from './tailwind'
 import { matchesAnyNode, parseRulePropsRaw, extractPseudoFromSelector } from './css-rules'
 import { S, isActive, assistMode, OVERLAY_ID, HIGHLIGHT_CLASS, LOCKED_CLASS, PREVIEW_CLASS, FLOATING_BTN_ID } from './state'
 import { showUpgradeModal } from './panels/modals'
 import { showAIPrompt } from './panels/ai-prompt'
-import { toggleShortcutsPanel } from './panels/shortcuts'
-import { showPreviewPanel, extractPreviewHTML } from './panels/preview-dev'
-import { updateSidePanel, hideSidePanel } from './side-panel'
 import { showSettingsPopup } from './panels/settings'
+import { updateSidePanel, hideSidePanel, repositionSidePanel } from './side-panel'
 import { initFloatingButton } from './floating-button'
 import { showHintBar, hideHintBar } from './hint-bar'
 
@@ -40,6 +55,8 @@ getLicenseStatus().then(s => { S.licenseIsPro = s.isPro })
 // ─── Display format preferences ────────────────────────────────────────
 let _colorFormat: 'rgb' | 'hex' | 'hsl' = 'rgb'
 let _shortenCSS = true
+let _showTW = true
+let _overlaySide: 'left' | 'right' = 'right'
 
 function reloadFormatSettings() {
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
@@ -47,7 +64,19 @@ function reloadFormatSettings() {
     _colorFormat = s.colorFormat || 'rgb'
     _shortenCSS = s.shortenCSS !== false
     S.showSidePanel = s.showSidePanel !== false
+    _showTW = s.showTailwindOverlay !== false
+    _overlaySide = s.overlaySide === 'left' ? 'left' : 'right'
+    // Re-render the current overlay so settings apply in real time
+    rerenderOverlay()
   })
+}
+
+/** Re-render the overlay for the current target so live settings changes show immediately. */
+function rerenderOverlay() {
+  const target = (S.lockedElement || S.lastHighlighted) as Element | null
+  if (target && S.lastParsedCSS && document.body.contains(target)) {
+    showOverlay(target, S.lastParsedCSS)
+  }
 }
 
 function convertColor(value: string, format: 'rgb' | 'hex' | 'hsl'): string {
@@ -168,8 +197,7 @@ export function updateModeUI() {
     }
   }
 
-  const target = S.lockedElement || S.lastHighlighted
-  if (target) updateGuides(target.getBoundingClientRect())
+  refreshGuides(null)  // on mode switch: draw lock set, clear hover (no stale lines)
 }
 
 // ─── Inspector activation/deactivation ─────────────────────────────────
@@ -203,12 +231,12 @@ export function setInspectMode(newMode: number) {
     hideHintBar()
   }
 
-  updateModeUI()
+  updateModeUI()  // also positions/hides the guides based on the new mode
 
   // persist
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
     const s = res.stylesnap_settings || {}
-    s.S.inspectMode = S.inspectMode
+    s.inspectMode = S.inspectMode
     if (newMode > 0) s.lastUsedMode = newMode
     chrome.storage.local.set({ stylesnap_settings: s })
   })
@@ -216,27 +244,73 @@ export function setInspectMode(newMode: number) {
 
 // ─── Guides ───────────────────────────────────────────────────────────
 
+// Guides live in the shadow root with fully inline styles + JS-driven
+// visibility, so they don't depend on the page-global stylesheet, body
+// classes, or token resolution (all of which proved fragile across pages).
 function initGuides() {
-  const ids = ['stylesnap-guide-h', 'stylesnap-guide-v']
-  ids.forEach(id => {
-    if (!document.getElementById(id)) {
+  // Two sets of 4 edge-aligned guide lines (top/bottom/left/right of an element's
+  // bounding box, each extended across the viewport): 'lock' = the locked element
+  // (indigo), 'hover' = the element under the cursor (cyan). Self-contained in the
+  // shadow root, fully inline-styled, JS-driven visibility — no global CSS deps.
+  // Low z-index within the shadow so they render beneath the overlay/panels.
+  const GUIDE_SETS = { lock: 'rgba(99,102,241,0.8)', hover: 'rgba(34,211,238,0.85)' } as const
+  ;(Object.keys(GUIDE_SETS) as Array<keyof typeof GUIDE_SETS>).forEach(set => {
+    ;(['t', 'b', 'l', 'r'] as const).forEach(edge => {
+      const id = `ss-guide-${set}-${edge}`
+      if ($$(id)) return
       const el = document.createElement('div')
       el.id = id
-      el.className = 'stylesnap-guide'
       el.setAttribute('data-stylesnap', 'true')
-      document.body.appendChild(el)
-    }
+      const horizontal = edge === 't' || edge === 'b'
+      // Use left:0;right:0 / top:0;bottom:0 (NOT 100vw/100vh): 100vw includes the
+      // scrollbar width, so a fixed full-width line overflows and forces a
+      // horizontal scrollbar onto the page.
+      el.style.cssText = `position:fixed;pointer-events:none;z-index:1;display:none;background:${GUIDE_SETS[set]};`
+        + (horizontal ? 'left:0;right:0;height:1px;' : 'top:0;bottom:0;width:1px;')
+      stAppend(el)
+    })
   })
 }
 
-function updateGuides(rect: DOMRect) {
-  if (assistMode() !== 1) return
-  const h = document.getElementById('stylesnap-guide-h')
-  const v = document.getElementById('stylesnap-guide-v')
-  if (h && v) {
-    h.style.top = `${rect.top + rect.height / 2}px`
-    v.style.left = `${rect.left + rect.width / 2}px`
-  }
+function drawGuideSet(set: 'lock' | 'hover', rect: DOMRect) {
+  const t = $$(`ss-guide-${set}-t`), b = $$(`ss-guide-${set}-b`)
+  const l = $$(`ss-guide-${set}-l`), r = $$(`ss-guide-${set}-r`)
+  if (!t || !b || !l || !r) return
+  t.style.top = `${Math.round(rect.top)}px`; t.style.display = 'block'
+  b.style.top = `${Math.round(rect.bottom)}px`; b.style.display = 'block'
+  l.style.left = `${Math.round(rect.left)}px`; l.style.display = 'block'
+  r.style.left = `${Math.round(rect.right)}px`; r.style.display = 'block'
+}
+
+function hideGuideSet(set: 'lock' | 'hover') {
+  ;(['t', 'b', 'l', 'r'] as const).forEach(edge => {
+    const e = $$(`ss-guide-${set}-${edge}`)
+    if (e) e.style.display = 'none'
+  })
+}
+
+/**
+ * Reconcile both guide sets. The lock set follows S.lockedElement. The hover set
+ * is drawn ONLY for an explicitly-passed element (the one truly under the cursor
+ * right now) — never from stale state — so switching INTO guidelines mode doesn't
+ * paint leftover lines on an element the mouse has since left.
+ *   - hoverEl undefined → leave the hover set as-is (used by lock-only refreshes)
+ *   - hoverEl null      → hide the hover set
+ *   - hoverEl element   → draw the hover set on it
+ */
+function refreshGuides(hoverEl?: Element | null) {
+  if (assistMode() !== 1) { hideGuideSet('lock'); hideGuideSet('hover'); return }
+  // Lock set
+  if (S.lockedElement && document.body.contains(S.lockedElement)) {
+    drawGuideSet('lock', S.lockedElement.getBoundingClientRect())
+  } else hideGuideSet('lock')
+  // Hover set — when not locked, the hovered element is the primary focus and
+  // uses the lock set instead (so a plain hover shows one clean set).
+  if (hoverEl === undefined) return
+  if (hoverEl && document.body.contains(hoverEl) && hoverEl !== S.lockedElement) {
+    if (S.lockedElement) drawGuideSet('hover', hoverEl.getBoundingClientRect())
+    else drawGuideSet('lock', hoverEl.getBoundingClientRect())
+  } else hideGuideSet('hover')
 }
 
 // ─── CSS default-value filter ─────────────────────────────────────────
@@ -346,11 +420,12 @@ function getOrCreateOverlay(): HTMLElement {
 
 export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const overlay = getOrCreateOverlay()
+  // Single choke point for every hover/lock/nav — cache the current parsed CSS
+  // so Copy CSS / Prompt / CodePen always have it (was only set during DOM nav).
+  S.lastParsedCSS = parsedCSS
   const rect = el.getBoundingClientRect()
 
   const { styles, tailwindClasses = [], tailwindMatchRate = 0 } = parsedCSS
-  // Cache locked styles for compare diffing
-  _lockedCSS = { ...styles }
 
   // ─── Immediate position reset to avoid flash at stale position
   overlay.style.setProperty('left', `${Math.round(rect.left)}px`, 'important')
@@ -367,9 +442,9 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const MAX_FREE_TW = 4
   const twSlice = isPro ? tailwindClasses.length : Math.min(tailwindClasses.length, MAX_FREE_TW)
   const twHidden = tailwindClasses.length - twSlice
-  const tailwindStr = tailwindClasses.slice(0, twSlice).join(' ')
+  const tailwindStr = !_showTW ? '' : tailwindClasses.slice(0, twSlice).join(' ')
     + (twHidden > 0 ? ` <span class="ss-tw-more">+${twHidden} more</span>` : '')
-  const twUpgradeBar = (!isPro && twHidden > 0)
+  const twUpgradeBar = (_showTW && !isPro && twHidden > 0)
     ? `<div class="ss-tw-upgrade"><span>🔒 ${twHidden} Tailwind classes hidden</span> <a class="ss-upgrade-link">Upgrade to Pro →</a></div>`
     : ''
   const matchPct = Math.round(tailwindMatchRate * 100)
@@ -465,7 +540,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       </span>
       <span class="ss-tag">${el.tagName.toLowerCase()}</span>
       <span class="ss-dim">${Math.round(rect.width)}×${Math.round(rect.height)}</span>
-      <span class="ss-match">TW ${matchPct}%</span>
+      ${_showTW ? `<span class="ss-match">TW ${matchPct}%</span>` : ''}
     </div>
     ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
     ${twUpgradeBar}
@@ -476,11 +551,11 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
         <button class="ss-copy-btn" title="${t('copyCSS')}">
           <svg ${SVG} width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> CSS
         </button>
-        <button class="ss-tw-copy-btn" title="Copy Tailwind classes" style="opacity:${matchPct >= 30 ? '1' : '0.4'};">
+        ${_showTW ? `<button class="ss-tw-copy-btn" title="Copy Tailwind classes" style="opacity:${matchPct >= 30 ? '1' : '0.4'};">
           <svg ${SVG} width="12" height="12"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M8 12s1-2 4-2 4 2 4 2"/></svg> TW
-        </button>
+        </button>` : ''}
         <button class="ss-ai-btn" title="Generate AI Prompt">
-          <svg ${SVG} width="12" height="12" stroke="#a78bfa"><path d="M15 4 20 9 9 20 4 20 4 15Z"/><path d="m13 6 5 5"/></svg> Prompt
+          <svg ${SVG} width="12" height="12"><path d="M15 4 20 9 9 20 4 20 4 15Z"/><path d="m13 6 5 5"/></svg> Prompt
         </button>
         <button class="ss-export-btn" title="Open in CodePen">
           <svg ${SVG} width="12" height="12"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg> CodePen
@@ -511,10 +586,11 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const updatePosition = () => {
     computePosition(el, overlay, {
       strategy: 'fixed',
-      placement: 'bottom-start',
+      // overlaySide controls which corner the overlay anchors to
+      placement: _overlaySide === 'left' ? 'bottom-end' : 'bottom-start',
       middleware: [
         offset(4),
-        flip({ fallbackPlacements: ['top-start', 'right-start', 'left-start'] }),
+        flip({ fallbackPlacements: _overlaySide === 'left' ? ['top-end', 'left-start', 'right-start'] : ['top-start', 'right-start', 'left-start'] }),
         shift({ padding: 8 }),
       ],
     }).then(({ x, y }) => {
@@ -522,6 +598,11 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       if (gen !== S.overlayGen) return
       overlay.style.setProperty('left', `${Math.round(x)}px`, 'important')
       overlay.style.setProperty('top', `${Math.round(y)}px`, 'important')
+      // Keep guides anchored to the element on scroll/resize too
+      if (S.lockedElement) {
+        refreshGuides(S.lastHighlighted)  // keep lock + hover sets following on scroll
+        repositionSidePanel(overlay)
+      }
     }).catch(() => {
       // Fallback: position below element with naive calc
       if (gen !== S.overlayGen) return
@@ -542,12 +623,11 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     })
   }
 
-  // Do an immediate position update first
+  // Do an immediate position update first, then auto-track on scroll/resize
+  // for BOTH hover and locked — a locked overlay must follow its element when
+  // the page scrolls (previously it stayed frozen in place).
   updatePosition()
-  // Only auto-track when hovering (not locked) — locked overlay stays put
-  if (!isCurrentlyLocked) {
-    S.overlayCleanup = autoUpdate(el, overlay, updatePosition)
-  }
+  S.overlayCleanup = autoUpdate(el, overlay, updatePosition)
 
   // ─── Inline edit + per-value copy handlers (reusable for expand) ───
   function attachCSSHandlers(container: HTMLElement) {
@@ -717,13 +797,10 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     })
   }
 
-  // ─── Side panel (Box Model + Preview) — only when locked ───────────
-  if (S.showSidePanel && isCurrentlyLocked) {
-    updateSidePanel(el as HTMLElement, parsedCSS, overlay)
-  } else {
-    hideSidePanel()
+  // Side panel — hide on small viewports to avoid crowding
+  if (S.showSidePanel && isCurrentlyLocked && window.innerWidth >= 900) {
+    updateSidePanel(el as HTMLElement, overlay)
   }
-
 }
 
 function hideOverlay() {
@@ -740,8 +817,6 @@ function hideOverlay() {
   if (menu) menu.remove()
   hideSidePanel()
 }
-
-// ─── Side Panel (Box Model + Preview) ────────────────────────────────
 
 // ─── Inline edit ────────────────────────────────────────────────────
 
@@ -793,8 +868,6 @@ export function unlockElement() {
     S.lockedElement.classList.remove(LOCKED_CLASS)
     S.lockedElement = null
   }
-  removeCompareHighlight()
-  hideCompareTooltip()
   const overlay = $$(OVERLAY_ID)
   if (overlay) {
     overlay.classList.remove('ss-active')
@@ -816,110 +889,6 @@ function updateLockIcon(overlay: HTMLElement, isLocked: boolean) {
     iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>'
     iconEl.style.color = '#64748b'
     ;(iconEl as HTMLElement).title = 'Click to lock'
-  }
-}
-
-// ─── Compare mode ────────────────────────────────────────────────────
-let _compareTarget: HTMLElement | null = null
-let _compareTooltip: HTMLElement | null = null
-let _lockedCSS: Record<string, string> = {}  // cached locked element styles for diffing
-
-function computeCSSDiff(hoveredEl: Element) {
-  const ov = $$(OVERLAY_ID)
-  if (!ov) return
-
-  const hoveredStyles = window.getComputedStyle(hoveredEl as HTMLElement)
-  let diffCount = 0
-
-  ov.querySelectorAll('.ss-val').forEach((valEl) => {
-    const span = valEl as HTMLElement
-    const prop = span.dataset.prop
-    if (!prop || !_lockedCSS[prop]) return
-    const lockedVal = _lockedCSS[prop]
-    // Query the hovered element for the same property
-    let hoveredVal: string
-    try {
-      hoveredVal = hoveredStyles.getPropertyValue(prop)
-    } catch {
-      return
-    }
-    // Normalize values (strip whitespace, semicolons)
-    const normL = lockedVal.replace(/;\s*$/, '').trim()
-    const normH = hoveredVal.replace(/;\s*$/, '').trim()
-    if (normL !== normH && hoveredVal) {
-      span.classList.add('ss-val-diff')
-      span.setAttribute('data-compare', normH)
-      diffCount++
-    }
-  })
-
-  // Show diff count as toast
-  const elTag = (hoveredEl as HTMLElement).tagName.toLowerCase()
-  if (diffCount > 0) {
-    showToast(`${diffCount} diff(s) vs <${elTag}>`)
-  } else {
-    showToast('No differences found')
-  }
-}
-
-function clearCompareDiff() {
-  const ov = $$(OVERLAY_ID)
-  if (!ov) return
-  ov.querySelectorAll('.ss-val-diff').forEach((el) => {
-    el.classList.remove('ss-val-diff')
-    el.removeAttribute('data-compare')
-  })
-}
-
-function highlightCompareElement(el: Element | null) {
-  if (!el || el === S.lockedElement) return
-  const elh = el as HTMLElement
-  if (_compareTarget && _compareTarget !== elh) {
-    _compareTarget.classList.remove('stylesnap-compare-highlight')
-    clearCompareDiff()
-  }
-  elh.classList.add('stylesnap-compare-highlight')
-  _compareTarget = elh
-  computeCSSDiff(el)
-}
-
-function removeCompareHighlight() {
-  if (_compareTarget) {
-    _compareTarget.classList.remove('stylesnap-compare-highlight')
-    _compareTarget = null
-  }
-  clearCompareDiff()
-}
-
-function showCompareTooltip(el: Element | null, x?: number, y?: number) {
-  if (!el) return
-  hideCompareTooltip()
-  const tip = document.createElement('div')
-  tip.className = 'stylesnap-compare-tooltip'
-  tip.textContent = '↔ Compare'
-  tip.style.cssText = `
-    position: fixed !important;
-    left: ${x ?? 0}px !important;
-    top: ${(y ?? 0) - 28}px !important;
-    background: rgba(251,191,36,0.95) !important;
-    color: var(--ss-bg-deep) !important;
-    font-size: 10px !important;
-    font-weight: 700 !important;
-    padding: 3px 8px !important;
-    border-radius: 4px !important;
-    pointer-events: none !important;
-    z-index: 999992 !important;
-    white-space: nowrap !important;
-    font-family: system-ui, sans-serif !important;
-  `
-  stAppend(tip)
-  _compareTooltip = tip
-}
-
-function hideCompareTooltip() {
-  if (_compareTooltip) {
-    _compareTooltip.remove()
-    _compareTooltip = null
   }
 }
 
@@ -1085,42 +1054,26 @@ function handleMouseMove(e: MouseEvent) {
 
   // Bug 5: iframe cross-origin check – skip elements inside iframes
   if (el && el.ownerDocument !== document) return
-  if (!el || el.closest('[data-stylesnap]')) {
-    removeCompareHighlight()
-    hideCompareTooltip()
-    return
-  }
+  if (!el || el.closest('[data-stylesnap]')) return
 
   // If an element is locked, show preview dashed outline on other elements
   // (but keep overlay frozen on the locked element)
   if (S.lockedElement) {
-    if (!S.compareMode) {
-      if (el === S.lockedElement || el === S.lastHighlighted) return
-      removeHighlight()
-      el.classList.add(PREVIEW_CLASS)
-      S.lastHighlighted = el
-      return
-    }
-    // Compare mode: keep existing logic
-    if (el === S.lockedElement) {
-      removeCompareHighlight()
-      hideCompareTooltip()
-      return
-    }
-    highlightCompareElement(el)
-    showCompareTooltip(el, e.clientX, e.clientY)
+    if (el === S.lockedElement || el === S.lastHighlighted) return
+    removeHighlight()
+    el.classList.add(PREVIEW_CLASS)
+    S.lastHighlighted = el
+    refreshGuides(el)  // locked set stays; hover set follows this element
     return
   }
 
   if (el === S.lastHighlighted) return
 
-  removeCompareHighlight()
-  hideCompareTooltip()
   highlightElement(el)
   const parsedCSS = parseElement(el)
   showOverlay(el, parsedCSS)
   const rect = el.getBoundingClientRect()
-  updateGuides(rect)
+  refreshGuides(el)
 
   chrome.runtime.sendMessage({
     type: 'ELEMENT_HOVERED',
@@ -1168,7 +1121,7 @@ function onClick(e: MouseEvent) {
       lockElement(el)
       const parsedCSS = parseElement(el)
       showOverlay(el, parsedCSS)
-      updateGuides(el.getBoundingClientRect())
+      refreshGuides(null)
       chrome.runtime.sendMessage({
         type: 'ELEMENT_LOCKED',
         payload: {
@@ -1191,7 +1144,7 @@ function onClick(e: MouseEvent) {
   const componentCSS = extractComponentCSS(el, 3)
 
   showOverlay(el, parsedCSS)
-  updateGuides(el.getBoundingClientRect())
+  refreshGuides(null)
 
   chrome.runtime.sendMessage({
     type: 'ELEMENT_CLICKED',
@@ -1219,16 +1172,7 @@ function onKeyDown(e: KeyboardEvent) {
     else if (S.inspectMode === 3) setInspectMode(1)
     const labels = ['Off', 'Inspect', 'Guidelines', 'Grid']
     showToast(`Mode: ${labels[S.inspectMode]}`)
-    const target = S.lockedElement || S.lastHighlighted
-    if (target) updateGuides(target.getBoundingClientRect())
-    return
-  }
-
-  // ─── Keyboard shortcuts help (?) ───
-  if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && isActive()) {
-    e.preventDefault()
-    e.stopPropagation()
-    toggleShortcutsPanel()
+    // guides handled by setInspectMode → updateModeUI → refreshGuides
     return
   }
 
@@ -1238,8 +1182,6 @@ function onKeyDown(e: KeyboardEvent) {
     // Priority: unlock, then exit inspect mode
     if (S.lockedElement) {
       unlockElement()
-      removeCompareHighlight()
-      hideCompareTooltip()
       chrome.runtime.sendMessage({ type: 'ELEMENT_UNLOCKED' }).catch(() => {})
       hideOverlay()
       return
@@ -1296,7 +1238,7 @@ function onKeyDown(e: KeyboardEvent) {
       }
 
       showOverlay(target, parsedCSS)
-      updateGuides((target as HTMLElement).getBoundingClientRect())
+      refreshGuides(target as Element)
       showToast(`${tag(target)} ${(target as HTMLElement).id ? '#' + (target as HTMLElement).id : classNameOf(target) ? '.' + classNameOf(target).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0,2).join('.') : ''}`)
     }
   }
@@ -1536,8 +1478,7 @@ function exportCSSToCodePen() {
 
 function onScroll() {
   if (!isActive()) return
-  const target = S.lockedElement || S.lastHighlighted
-  if (target) updateGuides(target.getBoundingClientRect())
+  refreshGuides(S.lastHighlighted)  // re-anchor lock + hover sets to current rects
 }
 
 // Export for @crxjs/vite-plugin loader
@@ -1687,113 +1628,9 @@ document.addEventListener('stylesnap-debug-lock', ((e: CustomEvent) => {
   }
 }) as EventListener)
 
-document.addEventListener('stylesnap-debug-toggle-compare', (() => {
-  S.compareMode = !S.compareMode
-  const btn = document.getElementById('stylesnap-action-compare') as HTMLElement | null
-  if (btn) {
-    if (S.compareMode) { btn.classList.add('active'); btn.title = 'Compare: ON' }
-    else { btn.classList.remove('active'); btn.title = 'Compare: OFF' }
-  }
-  if (!S.compareMode) { removeCompareHighlight(); hideCompareTooltip() }
-}) as EventListener)
-
-document.addEventListener('stylesnap-debug-compare-state', ((e: CustomEvent) => {
-  const cb = e.detail?.callback as ((d: unknown) => void) | undefined
-  if (cb) cb({ compareMode: S.compareMode, lockedElement: !!S.lockedElement, compareTarget: !!_compareTarget })
-}) as EventListener)
-
-document.addEventListener('stylesnap-debug-compare', ((e: CustomEvent) => {
-  const selector = e.detail?.selector as string | undefined
-  if (!selector) return
-  const el = document.querySelector(selector)
-  if (el && S.compareMode && S.lockedElement) {
-    highlightCompareElement(el)
-    const rect = el.getBoundingClientRect()
-    showCompareTooltip(el, rect.left + rect.width / 2, rect.top)
-  }
-}) as EventListener)
-
 document.addEventListener('stylesnap-debug-unlock', (() => {
   unlockElement()
 }) as EventListener)
 
-// Debug: trigger preview panel for export
-document.addEventListener('stylesnap-debug-preview-css', (() => {
-  if (!S.lockedElement) { showToast('Lock an element first'); return }
-  const el = S.lockedElement as HTMLElement
-  el.classList.remove(LOCKED_CLASS)
-  const styles = window.getComputedStyle(el)
-  el.classList.add(LOCKED_CLASS)
-  const tag = el.tagName.toLowerCase()
-  const id = el.id
-  const cls = Array.from(el.classList).filter(c => !c.startsWith('stylesnap-')).join('.')
-  const selector = id ? `#${id}` : cls ? `.${cls}` : tag
-  const props: string[] = []
-  for (let i = 0; i < styles.length; i++) {
-    const prop = styles[i]
-    const val = styles.getPropertyValue(prop)
-    if (val && !['initial', 'none'].includes(val)) {
-      props.push(`  ${prop}: ${val};`)
-    }
-  }
-  const text = `${selector} {\n${props.join('\n')}\n}`
-  showPreviewPanel({
-    code: text, type: 'css',
-    title: `${tag} — CSS`,
-    previewHTML: extractPreviewHTML(el),
-    previewCSS: text,
-  })
-}) as EventListener)
-
-// Debug: trigger preview panel for Tailwind
-document.addEventListener('stylesnap-debug-preview-tw', (() => {
-  if (!S.lockedElement) { showToast('Lock an element first'); return }
-  const el = S.lockedElement as HTMLElement
-  el.classList.remove(LOCKED_CLASS)
-  const styles = window.getComputedStyle(el)
-  el.classList.add(LOCKED_CLASS)
-  const classes = mapCSSToTailwind(styles)
-  const tag = el.tagName.toLowerCase()
-  const text = classes.length > 0
-    ? `<!-- ${tag} → ${classes.length} Tailwind classes -->\nclass="${classes.join(' ')}"`
-    : `/* No direct Tailwind mapping found for this element. */`
-  showPreviewPanel({
-    code: text, type: 'tailwind',
-    title: `${tag} — Tailwind`,
-    previewHTML: extractPreviewHTML(el),
-  })
-}) as EventListener)
-
-// Debug: trigger preview panel for component (simulate AI generation)
-document.addEventListener('stylesnap-debug-preview-component', (() => {
-  if (!S.lockedElement) { showToast('Lock an element first'); return }
-  const el = S.lockedElement as HTMLElement
-  const previewHTML = extractPreviewHTML(el)
-  showPreviewPanel({
-    code: `export default function UpgradeButton() {\n  return (\n    <button className="bg-indigo-500 hover:bg-indigo-400 text-white font-semibold py-2.5 px-5 rounded-lg transition-all duration-200 hover:-translate-y-px hover:shadow-lg hover:shadow-indigo-500/40 text-sm cursor-pointer border-none">\n      Upgrade Now\n    </button>\n  )\n}`,
-    type: 'component',
-    title: `${el.tagName.toLowerCase()} — AI Component`,
-    previewHTML,
-  })
-}) as EventListener)
-
-// Debug: trigger preview panel for JSON
-document.addEventListener('stylesnap-debug-preview-json', (() => {
-  if (!S.lockedElement) { showToast('Lock an element first'); return }
-  const el = S.lockedElement as HTMLElement
-  el.classList.remove(LOCKED_CLASS)
-  const styles = window.getComputedStyle(el)
-  el.classList.add(LOCKED_CLASS)
-  const obj: Record<string, string> = {}
-  for (let i = 0; i < styles.length; i++) {
-    const prop = styles[i]
-    const val = styles.getPropertyValue(prop)
-    if (val && !['initial', 'none'].includes(val)) obj[prop] = val
-  }
-  showPreviewPanel({
-    code: JSON.stringify(obj, null, 2), type: 'json',
-    title: `${el.tagName.toLowerCase()} — JSON`,
-  })
-}) as EventListener)
 } // end if (import.meta.env.DEV)
 

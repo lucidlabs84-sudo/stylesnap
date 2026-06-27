@@ -201,7 +201,7 @@ export async function showSettingsPopup() {
   setLabel('ss-pref-floating-btn', 'floatingBtn')
   setLabel('ss-pref-show-tw', 'showTailwindOverlay')
   const spLabel = popup.querySelector('#ss-label-ss-pref-side-panel')
-  if (spLabel) spLabel.textContent = (t as Record<string, string>).showSidePanel || 'Inspector panel (box model + preview)'
+  if (spLabel) spLabel.textContent = 'Box Model'
   // ─── Event handlers ────────────────────────────────────────────────
 
   const savePrefs = () => {
@@ -237,7 +237,7 @@ export async function showSettingsPopup() {
   popup.querySelector('#ss-pref-side-panel')?.addEventListener('change', () => {
     savePrefs()
     if (!S.showSidePanel) hideSidePanel()
-    else if (S.lockedElement) { const ov = $$(OVERLAY_ID); if (ov) updateSidePanel(S.lockedElement as HTMLElement, S.lastParsedCSS, ov) }
+    else if (S.lockedElement) { const ov = $$(OVERLAY_ID); if (ov) updateSidePanel(S.lockedElement as HTMLElement, ov) }
   })
   popup.querySelector('#ss-pref-show-tw')?.addEventListener('change', savePrefs)
 

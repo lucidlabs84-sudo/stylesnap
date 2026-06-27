@@ -139,7 +139,7 @@ export interface UserSettings {
   colorFormat?:     'rgb' | 'hex' | 'hsl'
   /** Shorten CSS output: remove unnecessary units, shorten colors, merge shorthand */
   shortenCSS?:      boolean
-  /** Show the side panel (Box Model + Preview) next to the overlay when locked */
+  /** Show the side panel (Box Model) next to the overlay when locked */
   showSidePanel?:   boolean
 }
 

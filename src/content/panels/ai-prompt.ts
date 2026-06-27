@@ -151,8 +151,8 @@ Requirements:
         <div style="display:flex;gap:4px;padding:10px 16px 0;">
           ${tabs.map(t => `<button data-fw="${t.id}" style="background:${t.id===currentFw ? 'var(--ss-primary-border)' : 'rgba(255,255,255,0.04)'};border:1px solid ${t.id===currentFw ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'};color:${t.id===currentFw ? 'var(--ss-primary-lighter)' : '#64748b'};border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all 0.12s;">${t.label}</button>`).join('')}
         </div>
-        <div style="flex:1;overflow:auto;padding:10px 16px;">
-          <textarea id="ss-ai-textarea" readonly style="width:100%;height:300px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.07);border-radius:6px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.65;padding:10px 12px;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
+        <div class="ss-hint-scroll" style="flex:1;overflow:auto;padding:10px 16px;">
+          <textarea id="ss-ai-textarea" readonly class="ss-hint-scroll" style="width:100%;height:300px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.07);border-radius:6px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.65;padding:10px 12px;resize:none;outline:none;box-sizing:border-box;"></textarea>
         </div>
         <div style="padding:10px 16px 14px;display:flex;align-items:center;justify-content:flex-end;border-top:1px solid rgba(255,255,255,0.06);">
           <button id="ss-ai-copy" style="display:flex;align-items:center;gap:6px;background:rgba(99,102,241,0.18);border:1px solid rgba(99,102,241,0.38);color:var(--ss-primary-lighter);border-radius:6px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:system-ui,sans-serif;transition:all 0.15s;">${SVG_COPY} Copy Prompt</button>

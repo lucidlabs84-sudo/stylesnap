@@ -4,177 +4,6 @@ import { S, isActive, FLOATING_BTN_ID } from './state'
 import { detectLang, translations } from '@/lib/i18n-core'
 import { setInspectMode, updateModeUI } from './index'
 
-function injectFloatingBtnStyles() {
-  if (document.getElementById('stylesnap-btn-style')) return
-  const style = document.createElement('style')
-  style.id = 'stylesnap-btn-style'
-  style.textContent = `
-    #stylesnap-floating-btn {
-      position: fixed !important;
-      bottom: 24px !important;
-      right: 24px !important;
-      padding: 0 !important;
-      border-radius: 50% !important;
-      cursor: pointer !important;
-      z-index: 9999999 !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s, opacity 0.3s ease !important;
-      user-select: none !important;
-      border: none !important;
-      outline: none !important;
-      background: transparent !important;
-      overflow: visible !important;
-      display: flex !important;
-      align-items: center !important;
-      box-sizing: border-box !important;
-      width: 44px !important;
-      height: 44px !important;
-      opacity: 0.75 !important;
-    }
-    #stylesnap-floating-btn:hover,
-    #stylesnap-floating-btn.is-active,
-    #stylesnap-floating-btn.is-dragging {
-      opacity: 1 !important;
-    }
-
-    /* ── Inner circle ── */
-    #stylesnap-floating-btn-inner {
-      position: relative !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      width: 44px !important;
-      height: 44px !important;
-      background: linear-gradient(135deg, var(--ss-primary), #8b5cf6) !important;
-      border-radius: 50% !important;
-      z-index: 2 !important;
-      box-sizing: border-box !important;
-      box-shadow: 0 2px 6px rgba(99, 102, 241, 0.15) !important;
-      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s !important;
-    }
-    #stylesnap-floating-btn:hover #stylesnap-floating-btn-inner,
-    #stylesnap-floating-btn.is-dragging #stylesnap-floating-btn-inner {
-      transform: scale(1.06) translateY(-2px) !important;
-    }
-    #stylesnap-floating-btn.is-active #stylesnap-floating-btn-inner {
-      background: linear-gradient(135deg, var(--ss-primary), #8b5cf6) !important;
-      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.55) !important;
-    }
-
-    /* ── Streaming light ring (active state) ── */
-    #stylesnap-floating-btn-ring {
-      position: absolute !important;
-      top: -2px !important; left: -2px !important;
-      width: calc(100% + 4px) !important; height: calc(100% + 4px) !important;
-      border-radius: 50% !important;
-      overflow: hidden !important;
-      z-index: 1 !important;
-      pointer-events: none !important;
-      opacity: 0 !important;
-      transition: opacity 0.25s !important;
-    }
-    #stylesnap-floating-btn-ring::before {
-      content: '' !important;
-      position: absolute !important;
-      top: 50% !important; left: 50% !important;
-      width: 200% !important; height: 200% !important;
-      margin-top: -100% !important; margin-left: -100% !important;
-      transform-origin: center center !important;
-      animation: stylesnap-shimmer 3s linear infinite !important;
-      background: conic-gradient(
-        from 0deg,
-        transparent 0deg,
-        rgba(99, 102, 241, 0.15) 20deg,
-        rgba(99, 102, 241, 0.5) 30deg,
-        var(--ss-primary-light) 36deg,
-        #a78bfa 42deg,
-        rgba(139, 92, 246, 0.5) 48deg,
-        transparent 60deg,
-        transparent 130deg,
-        rgba(99, 102, 241, 0.15) 140deg,
-        rgba(99, 102, 241, 0.5) 150deg,
-        var(--ss-primary-light) 156deg,
-        #a78bfa 162deg,
-        rgba(139, 92, 246, 0.5) 168deg,
-        transparent 180deg,
-        transparent 250deg,
-        rgba(99, 102, 241, 0.15) 260deg,
-        rgba(99, 102, 241, 0.5) 270deg,
-        var(--ss-primary-light) 276deg,
-        #a78bfa 282deg,
-        rgba(139, 92, 246, 0.5) 288deg,
-        transparent 300deg,
-        transparent 360deg
-      ) !important;
-    }
-    #stylesnap-floating-btn.is-active #stylesnap-floating-btn-ring {
-      opacity: 1 !important;
-    }
-
-    /* ── Mode badge (bottom-right corner of ball) ── */
-    .stylesnap-mode-badge {
-      position: absolute !important;
-      bottom: -1px !important;
-      right: -1px !important;
-      min-width: 20px !important;
-      height: 16px !important;
-      background: rgba(99,102,241,0.85) !important;
-      border: none !important;
-      border-radius: 5px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      z-index: 3 !important;
-      pointer-events: none !important;
-      padding: 0 5px !important;
-      font-size: 11px !important;
-      font-weight: 600 !important;
-      color: #fff !important;
-      line-height: 1 !important;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
-    }
-    .stylesnap-mode-badge svg {
-      width: 11px !important;
-      height: 11px !important;
-      color: #fff !important;
-    }
-
-    /* ── Logo icon ── */
-    .stylesnap-logo-icon {
-      width: 26px !important;
-      height: 26px !important;
-      background: #fff !important;
-      color: var(--ss-primary) !important;
-      border-radius: 8px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      font-size: 15px !important;
-      font-weight: 900 !important;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
-      font-family: ui-sans-serif, system-ui, sans-serif !important;
-      box-sizing: border-box !important;
-      transition: color 0.2s, transform 0.2s !important;
-    }
-    #stylesnap-floating-btn:active .stylesnap-logo-icon {
-      transform: scale(0.9) !important;
-    }
-
-    /* ── Compare highlight (Bug 3) ── */
-    .stylesnap-compare-highlight {
-      outline: 2px dashed #fbbf24 !important;
-      outline-offset: 1px !important;
-      transition: outline 0.1s ease !important;
-    }
-
-    /* ── Rotate animation ── */
-    @keyframes stylesnap-shimmer {
-      0%   { transform: rotate(0deg); }
-      50%  { transform: rotate(180deg); }
-      100% { transform: rotate(360deg); }
-    }
-  `
-  document.head.appendChild(style)
-}
 
 let _fbInitializing = false
 let _fbResizeHandler: (() => void) | null = null
@@ -203,7 +32,6 @@ export async function initFloatingButton() {
     }
     S.inspectMode = 0  // always start inactive; user must click to activate
 
-    injectFloatingBtnStyles()
 
     const btn = document.createElement('button')
     btn.id = FLOATING_BTN_ID
@@ -226,11 +54,19 @@ export async function initFloatingButton() {
     let posCustomized = false  // F6: only persist position once the user has actually moved it
 
     chrome.storage.local.get(['stylesnap_btn_pos'], (res) => {
-      if (res.stylesnap_btn_pos) {
+      const pos = res.stylesnap_btn_pos
+      // Only honor a stored position if it's a sane, on-screen value — a stale or
+      // corrupt value would otherwise push the button far from the corner.
+      const padding = 10, btnSize = 44
+      const maxR = window.innerWidth - btnSize - padding
+      const maxB = window.innerHeight - btnSize - padding
+      if (pos && typeof pos.right === 'number' && typeof pos.bottom === 'number'
+          && pos.right >= 0 && pos.bottom >= 0 && pos.right <= maxR && pos.bottom <= maxB) {
         posCustomized = true
-        btn.style.setProperty('right', `${res.stylesnap_btn_pos.right}px`, 'important')
-        btn.style.setProperty('bottom', `${res.stylesnap_btn_pos.bottom}px`, 'important')
+        btn.style.setProperty('right', `${pos.right}px`, 'important')
+        btn.style.setProperty('bottom', `${pos.bottom}px`, 'important')
       }
+      // else: keep the default bottom-right (24/24) from SHADOW_FLOATING_BTN_CSS
     })
 
     // Window-level drag listeners are added only for the duration of a drag

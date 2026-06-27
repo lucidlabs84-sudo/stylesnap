@@ -13,8 +13,7 @@ export function toggleShortcutsPanel() {
     ['Hover + Click', 'Lock / unlock element'],
     ['Escape', 'Unlock or exit inspect mode'],
     ['↑ ↓ ← →', 'Navigate parent / child / siblings'],
-    ['Space (locked)', 'Toggle compare mode'],
-    ['?', 'Show / hide this help'],
+    ['G', 'Toggle assist mode (Guidelines / Grid)'],
   ]
 
   panel.innerHTML = `
@@ -29,9 +28,6 @@ export function toggleShortcutsPanel() {
           <kbd>${key}</kbd>
         </div>
       `).join('')}
-    </div>
-    <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);font-size:10px;color:var(--ss-text-dim, #64748b);text-align:center;">
-      Press <kbd>?</kbd> anytime to toggle this panel
     </div>
   `
 

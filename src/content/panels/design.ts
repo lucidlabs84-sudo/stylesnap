@@ -97,7 +97,10 @@ export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
       // Collect colors directly via getComputedStyle — more reliable than extractDesignTokens
       const colorMap = new Map<string, string>() // hex → original rgb string
       const colorProps = ['color','background-color','border-top-color','border-bottom-color','border-left-color','border-right-color','outline-color','fill','stroke']
-      document.querySelectorAll('*').forEach(node => {
+      const allNodes = document.querySelectorAll('*')
+      const MAX_NODES = 500
+      const nodes = allNodes.length > MAX_NODES ? Array.from(allNodes).slice(0, MAX_NODES) : Array.from(allNodes)
+      nodes.forEach(node => {
         if ((node as HTMLElement).dataset?.stylesnap) return
         if ((node as Element).id?.startsWith('stylesnap-')) return
         const cs = window.getComputedStyle(node as HTMLElement)
@@ -188,7 +191,10 @@ export function showDesignPopup(initialTab: 'colors' | 'fonts' = 'colors') {
   setTimeout(() => {
     try {
       const fontMap = new Map<string, {sizes: Set<string>, weights: Set<string>}>()
-      document.querySelectorAll('*').forEach(node => {
+      const allNodes = document.querySelectorAll('*')
+      const MAX_NODES = 500
+      const nodes = allNodes.length > MAX_NODES ? Array.from(allNodes).slice(0, MAX_NODES) : Array.from(allNodes)
+      nodes.forEach(node => {
         if ((node as HTMLElement).dataset?.stylesnap) return
         if (node.id?.startsWith('stylesnap-')) return
         const cs = window.getComputedStyle(node as HTMLElement)

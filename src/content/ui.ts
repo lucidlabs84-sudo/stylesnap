@@ -15,10 +15,14 @@ export function getStShadow(): ShadowRoot {
   const host = document.createElement('div')
   host.id = SHADOW_HOST_ID
   host.setAttribute('data-stylesnap', 'true')
-  Object.assign(host.style, {
-    position: 'fixed', top: '0', left: '0', width: '0', height: '0', zIndex: '9999990',
-    overflow: 'visible',
-  })
+  // Use !important so aggressive host-page CSS (e.g. `div { position: relative
+  // !important; width: 100% }`) can't force our 0×0 host into normal flow and
+  // add page scrollbars.
+  const hostCss: Record<string, string> = {
+    position: 'fixed', top: '0', left: '0', width: '0', height: '0',
+    margin: '0', padding: '0', border: '0', 'z-index': '9999990', overflow: 'visible',
+  }
+  for (const [k, v] of Object.entries(hostCss)) host.style.setProperty(k, v, 'important')
   document.body.appendChild(host)
   _stShadow = host.attachShadow({ mode: 'open' })
   const fbStyle = document.createElement('style')
