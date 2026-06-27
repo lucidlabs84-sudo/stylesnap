@@ -432,6 +432,29 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
 
   const { styles, tailwindClasses = [], tailwindMatchRate = 0 } = parsedCSS
 
+  // Resolve var() to its real (computed) value so the CSS is copy-paste-ready in
+  // any project — a `var(--radius-sm)` reference breaks outside the source project.
+  // The browser's computed value for the property IS the fully-resolved value.
+  // Keep the original var() per prop for a tooltip. Mutating `styles` (the same
+  // object behind S.lastParsedCSS) makes panel + Copy + CodePen all consistent.
+  const varOriginals: Record<string, string> = {}
+  {
+    const elh = el as HTMLElement
+    const stripped = Array.from(elh.classList).filter(c => c.startsWith('stylesnap-'))
+    if (stripped.length) elh.classList.remove(...stripped)
+    const cs = window.getComputedStyle(elh)
+    for (const k of Object.keys(styles)) {
+      if (styles[k].includes('var(')) {
+        const resolved = cs.getPropertyValue(k).trim()
+        if (resolved && resolved !== styles[k]) {
+          varOriginals[k] = styles[k]
+          styles[k] = resolved
+        }
+      }
+    }
+    if (stripped.length) elh.classList.add(...stripped)
+  }
+
   // ─── Immediate position reset to avoid flash at stale position
   overlay.style.setProperty('left', `${Math.round(rect.left)}px`, 'important')
   overlay.style.setProperty('top', `${Math.round(rect.bottom + 4)}px`, 'important')
@@ -466,7 +489,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   const perLineProp = (k: string, v: string) => {
     const displayVal = formatDisplayValue(k, v)
     const cBlock = isColorValue(v) ? colorBlock(v) : ''
-    return `<span class="ss-prop-row"><span class="ss-prop">${escapeHtml(k)}:</span> ${cBlock}<span class="ss-val" data-prop="${escapeHtml(k)}" data-original="${escapeHtml(v)}" title="Click to edit">${escapeHtml(displayVal)}<svg class="ss-val-edit-icon" ${SVG} width="9" height="9" style="opacity:0;margin-left:3px;vertical-align:middle;transition:opacity 0.15s;flex-shrink:0;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>;<button class="ss-val-copy-btn" data-text="${escapeHtml(`${k}: ${displayVal};`)}" title="Copy"><svg ${SVG} width="9" height="9"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></span>`
+    return `<span class="ss-prop-row"><span class="ss-prop">${escapeHtml(k)}:</span> ${cBlock}<span class="ss-val" data-prop="${escapeHtml(k)}" data-original="${escapeHtml(v)}" title="${varOriginals[k] ? escapeHtml(varOriginals[k]) + ' — click to edit' : 'Click to edit'}">${escapeHtml(displayVal)}<svg class="ss-val-edit-icon" ${SVG} width="9" height="9" style="opacity:0;margin-left:3px;vertical-align:middle;transition:opacity 0.15s;flex-shrink:0;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>;<button class="ss-val-copy-btn" data-text="${escapeHtml(`${k}: ${displayVal};`)}" title="Copy"><svg ${SVG} width="9" height="9"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></span>`
   }
 
   // Flat list: all properties in one block, sorted logically

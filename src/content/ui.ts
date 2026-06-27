@@ -77,12 +77,22 @@ export function attachOutsideClose(
 // ─── HTML / value helpers ─────────────────────────────────────────────
 export function isColorValue(val: string): boolean {
   if (!val) return false
-  const v = val.trim().toLowerCase()
+  const v0 = val.trim()
+  // var(...) is syntactically valid as a color, so CSS.supports('color', 'var(...)')
+  // is always true → it would put a swatch on EVERY var() value (border-radius,
+  // font-size, …). Only treat a var() as a color if its fallback is a color.
+  if (/^var\(/i.test(v0)) {
+    const m = v0.match(/^var\(\s*--[^,)]+,\s*(.+)\)\s*$/i)
+    return m ? isColorValue(m[1].trim()) : false
+  }
+  const v = v0.toLowerCase()
   if (/^#[0-9a-f]{3,8}$/i.test(v)) return true
-  if (/^rgb\(/.test(v) || /^rgba\(/.test(v)) return true
-  if (/^hsl\(/.test(v) || /^hsla\(/.test(v)) return true
+  if (/^rgba?\(/.test(v)) return true
+  if (/^hsla?\(/.test(v)) return true
   const namedColors = ['transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'revert']
   if (namedColors.includes(v)) return false
+  // calc()/other functions aren't colors even if CSS.supports is lenient
+  if (v.includes('calc(') || v.includes('(') && !/^(rgb|hsl|hwb|lab|lch|oklab|oklch|color)\(/.test(v)) return false
   if (CSS.supports('color', v)) return true
   return false
 }
