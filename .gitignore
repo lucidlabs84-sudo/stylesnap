@@ -47,3 +47,4 @@ src/assets/icons/
 # Push scripts
 push.sh
 push_to_github.py
+dist-demo/
