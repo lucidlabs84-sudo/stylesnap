@@ -306,18 +306,37 @@ export function initDemo(mountEl: HTMLElement) {
 }
 
 // Auto-init when script loads — look for mount point
+// Uses MutationObserver as fallback for SPAs where mount point appears after script load
 function autoInit() {
-  // Wait for DOM
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', tryMount, { once: true })
-  } else {
-    tryMount()
+  let tries = 0
+  const MAX_TRIES = 20
+  const INTERVAL_MS = 200
+
+  function attempt() {
+    const mount = document.getElementById('stylesnap-demo')
+    if (mount) {
+      console.log('[StyleSnap Demo] Mount point found, initializing...')
+      initDemo(mount)
+      return
+    }
+    tries++
+    if (tries < MAX_TRIES) {
+      setTimeout(attempt, INTERVAL_MS)
+    } else {
+      console.warn('[StyleSnap Demo] Mount point #stylesnap-demo not found after', MAX_TRIES * INTERVAL_MS, 'ms')
+    }
   }
-}
 
-function tryMount() {
-  const mount = document.getElementById('stylesnap-demo')
-  if (mount) initDemo(mount)
-}
+  // Also watch for the mount point being added dynamically
+  const observer = new MutationObserver(() => {
+    const mount = document.getElementById('stylesnap-demo')
+    if (mount && !container) {
+      console.log('[StyleSnap Demo] Mount point detected via MutationObserver')
+      observer.disconnect()
+      initDemo(mount)
+    }
+  })
+  observer.observe(document.body || document.documentElement, { childList: true, subtree: true })
 
-autoInit()
+  attempt()
+}
