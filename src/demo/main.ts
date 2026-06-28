@@ -340,3 +340,5 @@ function autoInit() {
 
   attempt()
 }
+
+autoInit()
