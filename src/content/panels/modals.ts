@@ -3,7 +3,6 @@ import { $$, stAppend, showToast } from '../ui'
 import { detectLang, translations } from '@/lib/i18n-core'
 import { activateLicenseKey, createCheckout } from '@/lib/license'
 import { submitFeedback } from '@/lib/feedback'
-import { DAILY_FREE_LIMIT } from '@/shared/constants'
 
 export async function showFeedbackModal() {
   $$('ss-feedback-modal')?.remove()
@@ -109,7 +108,7 @@ export async function showFeedbackModal() {
 
 // ─── Upgrade Modal ────────────────────────────────────────────────────────────
 
-export async function showUpgradeModal(trigger?: string) {
+export async function showUpgradeModal() {
   $$('ss-upgrade-modal')?.remove()
   $$('ss-upgrade-backdrop')?.remove()
 
@@ -129,13 +128,6 @@ export async function showUpgradeModal(trigger?: string) {
     { icon: '♾️', label: t.featUpdates || 'Lifetime updates', desc: t.featUpdatesDesc || 'Pay once, own forever' },
   ]
 
-  const quotaText = ((t as Record<string, string>).quotaReached || "You've used all {limit} free extractions today. Upgrade for unlimited access.").replace('{limit}', String(DAILY_FREE_LIMIT))
-  const quotaBanner = trigger === 'quota'
-    ? `<div style="background:rgba(251,146,60,0.1);border:1px solid rgba(251,146,60,0.3);border-radius:6px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#fbbf24;text-align:center;">
-        ⚠️ ${quotaText}
-      </div>`
-    : ''
-
   modal.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div>
@@ -144,7 +136,6 @@ export async function showUpgradeModal(trigger?: string) {
       </div>
       <button id="ss-upgrade-close" style="background:none;border:none;color:#475569;cursor:pointer;font-size:18px;line-height:1;padding:0;flex-shrink:0;">×</button>
     </div>
-    ${quotaBanner}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;">
       ${features.map(f => `
         <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px;">

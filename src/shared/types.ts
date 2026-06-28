@@ -101,8 +101,6 @@ export interface Message<T = unknown> {
 
 export interface LicenseStatus {
   isPro:              boolean
-  dailyUsed:          number
-  dailyLimit:         number
   email?:             string
   licenseKey?:        string
   instanceId?:        string        // DodoPayments activation instance ID (e.g. "lki_123")

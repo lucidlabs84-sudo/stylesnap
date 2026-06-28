@@ -87,21 +87,17 @@ export function showHintBar() {
     showHistoryPanel()
   })
 
-  // Async quota warning for free users
+  // Upgrade badge for free users
   getLicenseStatus().then(status => {
     if (status.isPro) return
-    const used = status.dailyUsed
-    const limit = status.dailyLimit
-    const pct = used / limit
-    if (pct < 0.5) return
-    const remaining = limit - used
-    const color = pct >= 0.9 ? '#f87171' : '#fbbf24'
-    const quotaSpan = document.createElement('span')
-    quotaSpan.style.cssText = `margin-left:6px;font-size:10px;color:${color};border:1px solid ${color}33;border-radius:3px;padding:1px 6px;cursor:pointer;`
-    quotaSpan.textContent = remaining <= 0 ? '0 left · Upgrade →' : `${remaining}/${limit} left`
-    quotaSpan.title = 'Upgrade to Pro for unlimited extractions'
-    quotaSpan.addEventListener('click', (e) => { e.stopPropagation(); showUpgradeModal() })
-    bar.insertBefore(quotaSpan, bar.querySelector('.ss-hint-action'))
+    const badge = document.createElement('span')
+    badge.style.cssText = 'margin-left:6px;font-size:10px;color:var(--ss-primary-light);border:1px solid var(--ss-primary-bg);border-radius:3px;padding:1px 6px;cursor:pointer;transition:all 0.15s;'
+    badge.textContent = 'Upgrade to Pro →'
+    badge.title = 'Unlock all features for $29'
+    badge.addEventListener('mouseenter', () => { badge.style.background = 'var(--ss-primary-bg)'; badge.style.borderColor = 'rgba(99,102,241,0.5)' })
+    badge.addEventListener('mouseleave', () => { badge.style.background = ''; badge.style.borderColor = 'var(--ss-primary-bg)' })
+    badge.addEventListener('click', (e) => { e.stopPropagation(); showUpgradeModal() })
+    bar.insertBefore(badge, bar.querySelector('.ss-hint-action'))
   })
 
   // Fade in

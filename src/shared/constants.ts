@@ -196,13 +196,11 @@ export const CSS_KEY_PROPERTIES = [
   'white-space',
 ]
 
-export const DAILY_FREE_LIMIT = 20
 export const PRO_PRICE_USD = 29
 export const PROXY_BASE_URL = 'https://api.lucidlibs.dev'
 
 export const STORAGE_KEYS = {
   LICENSE: 'stylesnap_license',
-  USAGE: 'stylesnap_usage',
   SETTINGS: 'stylesnap_settings',
   SAVED_TOKENS: 'stylesnap_tokens',
 } as const

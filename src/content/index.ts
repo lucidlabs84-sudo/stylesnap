@@ -742,6 +742,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     container.querySelectorAll('.ss-val-copy-btn').forEach((btn) => {
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation()
+        if (!S.licenseIsPro) { showUpgradeModal(); return }
         const text = (btn as HTMLElement).dataset.text
         if (text) {
           const decoded = text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
@@ -837,6 +838,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     twCopyBtn.dataset.bound = 'true'
     twCopyBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
+      if (!S.licenseIsPro) { showUpgradeModal(); return }
       const target = S.lockedElement || S.lastHighlighted
       if (!target) { showToast('Hover an element first'); return }
       const twClasses = getTailwindClasses(target)
@@ -1159,6 +1161,7 @@ function showCopyOptions(anchor: HTMLElement) {
 function copyCurrentCSS(el: Element) {
   // Copy the source-preserved rule set (same as CodePen export), honoring the
   // copy options: include children, font-size→px, include HTML.
+  if (!S.licenseIsPro) { showUpgradeModal(); return }
   let css = getComponentCSSForExport(el, _copyChildren).trim()
   if (!css) { showToast('No CSS to copy — hover an element first'); return }
   if (_copyFontSizePx) css = remToPx(css)
@@ -1603,6 +1606,7 @@ function submitCodePen(data: Record<string, string>) {
 }
 
 function exportCSSToCodePen() {
+  if (!S.licenseIsPro) { showUpgradeModal(); return }
   const el = S.lockedElement as HTMLElement
   if (!el) return
   const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')

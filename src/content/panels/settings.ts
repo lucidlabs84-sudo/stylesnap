@@ -81,10 +81,10 @@ export async function showSettingsPopup() {
   // License status text
   const proBadge = licenseStatus.isPro
     ? '<span style="background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3);border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;">PRO</span>'
-    : '<span style="background:rgba(148,163,184,0.1);color:#94a3b8;border:1px solid rgba(148,163,184,0.2);border-radius:3px;padding:1px 6px;font-size:10px;">Free</span>'
+    : ''
   const usageText = licenseStatus.isPro
     ? 'Unlimited'
-    : `${licenseStatus.dailyUsed}/${licenseStatus.dailyLimit} today`
+    : 'Upgrade to unlock all features'
   const licenseInfo = licenseStatus.isPro
     ? `<div style="font-size:10px;color:#64748b;margin-top:3px;">${licenseStatus.email || ''} ${licenseStatus.instanceId ? '· ' + licenseStatus.instanceId.slice(0, 8) + '...' : ''}</div>`
     : ''
@@ -327,7 +327,7 @@ export async function showSettingsPopup() {
   // License Recover — opens recovery page on website
   popup.querySelector('#ss-license-recover')?.addEventListener('click', (e) => {
     e.preventDefault()
-    window.open('https://style.lucidlibs.dev/recover', '_blank')
+    window.open('https://lucidlibs.dev/stylesnap/recover', '_blank')
   })
 
   // Update toggle visual on click (sync slider position)

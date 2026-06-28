@@ -1,21 +1,14 @@
 /**
  * License Manager — StyleSnap
- * Free: 20 extractions/day   |   Pro: unlimited ($29 one-time)
+ * Pro only ($29 one-time). No free tier.
  *
  * Uses DodoPayments License Key system via secure proxy API.
  * Flow: checkout → payment → license key returned → activate on device → validate periodically
  * Proxy: https://api.lucidlibs.dev
- *
- * DodoPayments API mapping:
- * - POST /licenses/activate   → public, returns { id, customer, product }
- * - POST /licenses/validate   → public, returns { valid: boolean }
- * - POST /licenses/deactivate → public, 200 on success
- * - GET  /license_keys        → API key required, returns { items: [{ id, key, status, instances_count, ... }] }
- * - GET  /license_key_instances → API key required, returns { items: [{ id, name, created_at }] }
  */
 import type { LicenseStatus, UserSettings } from '@/shared/types'
 import { DEFAULT_SETTINGS } from '@/shared/types'
-import { STORAGE_KEYS, DAILY_FREE_LIMIT, PROXY_BASE_URL } from '@/shared/constants'
+import { STORAGE_KEYS, PROXY_BASE_URL } from '@/shared/constants'
 import { showError } from './notifications'
 
 /**
@@ -27,8 +20,14 @@ async function proxyFetch(url: string, options: RequestInit = {}): Promise<Respo
     ...options,
     headers: {
       ...(options.headers || {}),
-      'x-extension-id': chrome.runtime.id || '',
     },
+  }
+  // Only add x-extension-id for non-checkout endpoints (checkout is public, CORS-safe)
+  if (!url.includes('/api/checkout')) {
+    mergedOptions.headers = {
+      ...(mergedOptions.headers || {}),
+      'x-extension-id': chrome.runtime.id || '',
+    }
   }
   return fetch(url, mergedOptions)
 }
@@ -51,20 +50,13 @@ function getDeviceName(): string {
 export async function getLicenseStatus(): Promise<LicenseStatus> {
   const data = await chrome.storage.local.get([
     STORAGE_KEYS.LICENSE,
-    STORAGE_KEYS.USAGE,
   ])
 
   const stored = data[STORAGE_KEYS.LICENSE] as Partial<LicenseStatus> | undefined
-  const usageRec = data[STORAGE_KEYS.USAGE] as { date: string; count: number } | undefined
-
-  const today     = new Date().toISOString().slice(0, 10)
-  const dailyUsed = usageRec?.date === today ? (usageRec.count ?? 0) : 0
 
   if (stored?.isPro) {
     return {
       isPro:              true,
-      dailyUsed,
-      dailyLimit:         Infinity,
       email:              stored.email,
       licenseKey:         stored.licenseKey,
       instanceId:         stored.instanceId,
@@ -79,22 +71,7 @@ export async function getLicenseStatus(): Promise<LicenseStatus> {
     }
   }
 
-  return { isPro: false, dailyUsed, dailyLimit: DAILY_FREE_LIMIT }
-}
-
-// ─── Usage tracking ───────────────────────────────────────────────────────────
-
-/** Returns false when free quota exceeded */
-export async function recordUsage(): Promise<boolean> {
-  const status = await getLicenseStatus()
-  if (status.isPro) return true
-  if (status.dailyUsed >= status.dailyLimit) return false
-
-  const today = new Date().toISOString().slice(0, 10)
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.USAGE]: { date: today, count: status.dailyUsed + 1 },
-  })
-  return true
+  return { isPro: false }
 }
 
 // ─── Checkout (DodoPayments via Proxy) ───────────────────────────────────────
@@ -162,8 +139,6 @@ export async function activateLicenseKey(licenseKey: string): Promise<{
     // Store license with full activation info from DodoPayments
     const payload: Partial<LicenseStatus> = {
       isPro:            true,
-      dailyUsed:        0,
-      dailyLimit:       Infinity,
       licenseKey:       key,
       instanceId:       data.instance_id,
       email:            data.customer_email || '',
