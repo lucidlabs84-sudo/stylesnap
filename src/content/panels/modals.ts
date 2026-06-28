@@ -120,12 +120,12 @@ export async function showUpgradeModal() {
   modal.setAttribute('data-stylesnap', 'true')
 
   const features = [
-    { icon: '∞', label: t.featUnlimited || 'Unlimited extractions', desc: t.featUnlimitedDesc || 'No daily limits' },
-    { icon: '🎨', label: t.featTailwind || 'Tailwind class export', desc: t.featTailwindDesc || '300+ mapping rules' },
-    { icon: '⚛️', label: t.featReactVue || 'React / Vue code gen', desc: t.featReactVueDesc || 'Ready-to-paste components' },
-    { icon: '🪙', label: t.featTokens || 'Design token export', desc: t.featTokensDesc || 'Full color & spacing system' },
-    { icon: '🤖', label: t.featAIFallback || 'AI code fallback', desc: t.featAIFallbackDesc || 'For complex patterns' },
-    { icon: '♾️', label: t.featUpdates || 'Lifetime updates', desc: t.featUpdatesDesc || 'Pay once, own forever' },
+    { icon: '🎨', label: 'CSS Export', desc: 'Copy clean CSS for any element to clipboard' },
+    { icon: '🌀', label: 'Tailwind Convert', desc: '300+ rules: CSS → Tailwind utility classes' },
+    { icon: '📦', label: 'CodePen Export', desc: 'Open element in CodePen with HTML + CSS' },
+    { icon: '🪙', label: 'Design Tokens', desc: 'Extract color palette, typography & spacing' },
+    { icon: '🤖', label: 'AI Prompt Gen', desc: 'Generate AI-ready prompts from element context' },
+    { icon: '♾️', label: 'Lifetime', desc: 'Pay once, own forever — no subscription' },
   ]
 
   modal.innerHTML = `
