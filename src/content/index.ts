@@ -603,10 +603,12 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       <span class="ss-dim">${Math.round(rect.width)}×${Math.round(rect.height)}</span>
       ${_showTW ? `<span class="ss-match">TW ${matchPct}%</span>` : ''}
     </div>
-    ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
-    ${twUpgradeBar}
-    <div class="ss-props-list"><pre class="ss-css ss-flat-list">${flatCSS}</pre>${pseudoHTML}${responsiveInline}</div>
-    ${expandBtn}
+    <div class="ss-scroll">
+      ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
+      ${twUpgradeBar}
+      <div class="ss-props-list"><pre class="ss-css ss-flat-list">${flatCSS}</pre>${pseudoHTML}${responsiveInline}</div>
+      ${expandBtn}
+    </div>
     <div class="ss-footer">
       <div class="ss-actions">
         <button class="ss-copy-btn" title="${t('copyCSS')}">
@@ -634,7 +636,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     attachCSSHandlers(overlay)
   }
 
-  overlay.style.setProperty('display', 'block', 'important')
+  overlay.style.setProperty('display', 'flex', 'important')
   overlay.classList.remove('ss-interactive')
   overlay.classList.add('ss-active')
   overlay.dataset.locked = isCurrentlyLocked ? '1' : '0'
@@ -699,7 +701,16 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
   // for BOTH hover and locked — a locked overlay must follow its element when
   // the page scrolls (previously it stayed frozen in place).
   updatePosition()
-  S.overlayCleanup = autoUpdate(el, overlay, updatePosition)
+  // Follow the page (scroll/resize) but NOT the element's own animation:
+  // layoutShift/elementResize/animationFrame would make the panel chase a
+  // transform/size animation on the locked element. Anchor it once instead.
+  S.overlayCleanup = autoUpdate(el, overlay, updatePosition, {
+    ancestorScroll: true,
+    ancestorResize: true,
+    elementResize: false,
+    layoutShift: false,
+    animationFrame: false,
+  })
 
   // ─── Inline edit + per-value copy handlers (reusable for expand) ───
   function attachCSSHandlers(container: HTMLElement) {

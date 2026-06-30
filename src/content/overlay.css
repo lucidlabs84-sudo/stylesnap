@@ -207,13 +207,14 @@
   font-family: var(--ss-font-mono) !important;
   font-size: var(--ss-font-sm) !important;
   line-height: 1.5 !important;
-  padding: 8px 10px !important;
+  padding: 0 !important;
   border-radius: var(--ss-radius-lg) !important;
   border: 1px solid rgba(99, 102, 241, 0.4) !important;
   box-shadow: var(--ss-shadow-panel), 0 0 0 1px rgba(99, 102, 241, 0.1) !important;
   max-width: 360px !important;
   max-height: 420px !important;
-  overflow-y: auto !important;
+  overflow: hidden !important;
+  flex-direction: column !important;
   pointer-events: none !important;
   display: none !important;
   word-break: break-word !important;
@@ -227,15 +228,23 @@
   user-select: text !important;
 }
 
-/* ── Overlay scrollbar ── */
-#stylesnap-overlay::-webkit-scrollbar { width: 5px !important; height: 5px !important; }
-#stylesnap-overlay::-webkit-scrollbar-track { background: transparent !important; }
-#stylesnap-overlay::-webkit-scrollbar-thumb {
+/* ── Scroll body: only the content scrolls; header + footer stay fixed.
+   Right padding is 0 so the scrollbar sits flush against the panel border. ── */
+#stylesnap-overlay .ss-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0 8px 10px;
+}
+#stylesnap-overlay .ss-scroll::-webkit-scrollbar { width: 5px !important; height: 5px !important; }
+#stylesnap-overlay .ss-scroll::-webkit-scrollbar-track { background: transparent !important; }
+#stylesnap-overlay .ss-scroll::-webkit-scrollbar-thumb {
   background: rgba(99, 102, 241, 0.25) !important;
   border-radius: var(--ss-radius-sm) !important;
 }
-#stylesnap-overlay::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.45) !important; }
-#stylesnap-overlay { scrollbar-width: thin !important; scrollbar-color: rgba(99, 102, 241, 0.25) transparent !important; }
+#stylesnap-overlay .ss-scroll::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.45) !important; }
+#stylesnap-overlay .ss-scroll { scrollbar-width: thin !important; scrollbar-color: rgba(99, 102, 241, 0.25) transparent !important; }
 
 
 /* ── Header ── */
@@ -243,15 +252,10 @@
   display: flex;
   align-items: center;
   gap: var(--ss-space-md);
-  margin-bottom: var(--ss-space-xs);
-  padding-bottom: var(--ss-space-xs);
+  flex: none;
+  padding: var(--ss-space-md) 0 var(--ss-space-xs) 10px;
   border-bottom: 1px solid var(--ss-border-primary);
-  position: sticky;
-  top: -8px;
   background: var(--ss-bg-panel);
-  z-index: 1;
-  padding-top: var(--ss-space-md);
-  margin-top: -8px;
 }
 
 #stylesnap-overlay .ss-tag {
@@ -307,7 +311,7 @@
 /* ── Section cards (pseudo-classes, responsive) ── */
 #stylesnap-overlay .ss-section-card {
   margin-top: 6px;
-  padding: 6px 8px;
+  padding: 6px 0 6px 8px;
   border-radius: 5px;
   border: 1px solid rgba(255,255,255,0.08);
   background: rgba(255,255,255,0.02);
@@ -479,10 +483,11 @@
   color: var(--ss-text-secondary);
   font-family: var(--ss-font-mono);
   word-break: break-all;
-  padding: 3px var(--ss-space-sm);
+  padding: 3px var(--ss-space-sm) 3px var(--ss-space-sm);
   background: var(--ss-bg-hover);
   border-radius: var(--ss-radius-md);
   border-left: 2px solid var(--ss-border-primary);
+  margin-right: 0;
 }
 #stylesnap-overlay .ss-compact-prop { white-space: nowrap; }
 #stylesnap-overlay .ss-cprop-name { color: var(--ss-primary-light); }
@@ -619,13 +624,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: var(--ss-space-sm) -10px -8px -10px;
-  padding: var(--ss-space-sm) 10px;
+  flex: none;
+  padding: var(--ss-space-sm) 0 var(--ss-space-sm) 10px;
   border-top: 1px solid var(--ss-border-subtle);
   background: var(--ss-bg-card);
-  position: sticky;
-  bottom: -8px;
-  z-index: 1;
   pointer-events: auto !important;
 }
 #stylesnap-overlay .ss-actions { display: flex; align-items: center; gap: var(--ss-space-xs); }
@@ -844,7 +846,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 8px;
+  padding: 5px 0 5px 8px;
   cursor: pointer;
   user-select: none;
   color: #64748b;
@@ -858,7 +860,7 @@
   background: rgba(255,255,255,0.03);
 }
 #stylesnap-overlay .ss-section-body {
-  padding: 4px 8px 8px;
+  padding: 4px 0 8px 8px;
 }
 
 /* ─── Design panel ─────────────────────────────────────────────────── */
@@ -917,9 +919,8 @@
 .ss-hint-scroll::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.45); }
 
 /* ─── Overlay: scrollbar flush with border ──────────────────────────── */
-#stylesnap-overlay {
-  scrollbar-gutter: stable !important;
-}
+/* scrollbar-gutter removed — .ss-scroll handles its own overflow,
+   and stable gutter on the parent only adds whitespace. */
 
 /* ─── Side Panel: Box Model ─────────────────────────────────────────── */
 
