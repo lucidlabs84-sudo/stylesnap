@@ -133,7 +133,7 @@ export function showToastImpl(message: string, duration: number) {
       position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
       background: 'rgba(15, 23, 42, 0.9)', color: '#fff', padding: '8px 16px',
       borderRadius: '8px', fontFamily: 'system-ui, sans-serif', fontSize: '13px',
-      fontWeight: '500', zIndex: '999993', pointerEvents: 'none',
+      fontWeight: '500', zIndex: '10000000', pointerEvents: 'none',
       transition: 'opacity 0.2s ease', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
       border: '1px solid rgba(255,255,255,0.1)',
     })
