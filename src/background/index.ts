@@ -44,6 +44,21 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // Message relay between content script and side panel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Proxy network requests (license activate/validate/deactivate, feedback)
+  // through the background service worker. Fetches made from the content
+  // script are subject to the host page's CSP connect-src, which silently
+  // blocks our API calls on strict-CSP sites — breaking license activation.
+  // The service worker has host_permissions and isn't bound by page CSP.
+  if (message.type === 'SS_PROXY_FETCH') {
+    fetch(message.url, message.options || {})
+      .then(async (r) => {
+        const body = await r.text()
+        sendResponse({ ok: r.ok, status: r.status, body })
+      })
+      .catch((e) => sendResponse({ ok: false, status: 0, error: String((e && e.message) || e) }))
+    return true // async response
+  }
+
   // Relay element info from content script to side panel
   if (message.type === 'ELEMENT_HOVERED' || message.type === 'ELEMENT_CLICKED') {
     // Broadcast to all extension pages

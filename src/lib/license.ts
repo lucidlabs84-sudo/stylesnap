@@ -12,16 +12,29 @@ import { STORAGE_KEYS, PROXY_BASE_URL } from '@/shared/constants'
 import { showError } from './notifications'
 
 /**
- * Wrapper around fetch() that automatically adds the extension ID header.
- * This allows the proxy server to verify the request is coming from our extension.
+ * Wrapper around fetch() for the license API.
+ *
+ * When called from the content script, a direct fetch() is subject to the host
+ * page's CSP (connect-src), which silently blocks our API on strict-CSP sites
+ * and breaks activation. So in a content-script context we relay the request
+ * through the background service worker (host_permissions, no page CSP) and
+ * rebuild a Response from its reply. In the service worker we fetch directly.
  */
 async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-    },
-  })
+  const inContentScript = typeof window !== 'undefined' && typeof document !== 'undefined'
+  if (inContentScript && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    try {
+      const reply = await chrome.runtime.sendMessage({ type: 'SS_PROXY_FETCH', url, options })
+      if (reply && typeof reply.status === 'number') {
+        return new Response(reply.body ?? '', { status: reply.status })
+      }
+      throw new Error(reply?.error || 'No response from background')
+    } catch (e) {
+      // Fall back to a direct fetch (e.g. background unavailable in dev/demo).
+      return fetch(url, { ...options, headers: { ...(options.headers || {}) } })
+    }
+  }
+  return fetch(url, { ...options, headers: { ...(options.headers || {}) } })
 }
 
 // ─── Device fingerprint ─────────────────────────────────────────────────────
