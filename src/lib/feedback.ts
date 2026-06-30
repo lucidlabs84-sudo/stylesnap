@@ -4,6 +4,7 @@
  */
 
 import { PROXY_BASE_URL } from '@/shared/constants'
+import { proxyFetch } from './license'
 
 export interface FeedbackPayload {
   type: 'bug' | 'feature' | 'general' | 'praise'
@@ -15,12 +16,11 @@ export interface FeedbackPayload {
 
 export async function submitFeedback(payload: FeedbackPayload): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${PROXY_BASE_URL}/api/feedback`, {
+    // Relay through the background SW (see proxyFetch) so the request isn't
+    // blocked by the host page's CSP on strict sites.
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/feedback`, {
       method: 'POST',
-      headers: {
-        'Content-Type':   'application/json',
-        'x-extension-id': chrome.runtime.id,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
 

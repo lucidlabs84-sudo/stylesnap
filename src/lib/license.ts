@@ -20,7 +20,7 @@ import { showError } from './notifications'
  * through the background service worker (host_permissions, no page CSP) and
  * rebuild a Response from its reply. In the service worker we fetch directly.
  */
-async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
+export async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const inContentScript = typeof window !== 'undefined' && typeof document !== 'undefined'
   if (inContentScript && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
     try {
