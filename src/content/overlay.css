@@ -253,7 +253,7 @@
   align-items: center;
   gap: var(--ss-space-md);
   flex: none;
-  padding: var(--ss-space-md) 0 var(--ss-space-xs) 10px;
+  padding: var(--ss-space-md) 10px var(--ss-space-xs) 10px;
   border-bottom: 1px solid var(--ss-border-primary);
   background: var(--ss-bg-panel);
 }
