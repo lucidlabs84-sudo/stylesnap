@@ -16,20 +16,12 @@ import { showError } from './notifications'
  * This allows the proxy server to verify the request is coming from our extension.
  */
 async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const mergedOptions: RequestInit = {
+  return fetch(url, {
     ...options,
     headers: {
       ...(options.headers || {}),
     },
-  }
-  // Only add x-extension-id for non-checkout endpoints (checkout is public, CORS-safe)
-  if (!url.includes('/api/checkout')) {
-    mergedOptions.headers = {
-      ...(mergedOptions.headers || {}),
-      'x-extension-id': chrome.runtime.id || '',
-    }
-  }
-  return fetch(url, mergedOptions)
+  })
 }
 
 // ─── Device fingerprint ─────────────────────────────────────────────────────

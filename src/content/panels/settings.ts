@@ -269,17 +269,35 @@ export async function showSettingsPopup() {
   attachOutsideClose(popup, { delay: 200 })
 
   // License Activate
-  popup.querySelector('#ss-license-activate')?.addEventListener('click', async () => {
-    const keyInput = popup.querySelector('#ss-license-key') as HTMLInputElement
+  const activateBtn = popup.querySelector('#ss-license-activate') as HTMLButtonElement | null
+  const keyInput = popup.querySelector('#ss-license-key') as HTMLInputElement | null
+
+  activateBtn?.addEventListener('click', async function(this: HTMLButtonElement) {
     const key = keyInput?.value?.trim()
     if (!key) { showToast('Enter a license key'); return }
-    showToast('Activating...')
+
+    // Disable button + show loading state
+    const btn = this
+    const originalText = btn.textContent || 'Activate'
+    btn.disabled = true
+    btn.textContent = 'Activating...'
+    btn.style.opacity = '0.7'
+    if (keyInput) keyInput.disabled = true
+
+    showToast('Activating license...')
     const result = await activateLicenseKey(key)
+
+    // Re-enable
+    btn.disabled = false
+    btn.textContent = originalText
+    btn.style.opacity = ''
+    if (keyInput) keyInput.disabled = false
+
     if (result.success) {
-      showToast('License activated! 🎉')
+      showToast('License activated!')
+      S.licenseIsPro = true
       popup.remove()
-      // Re-open to show new state
-      setTimeout(() => showSettingsPopup(), 400)
+      setTimeout(() => showSettingsPopup(), 500)
     } else {
       showToast(result.error || 'Activation failed')
     }
