@@ -630,10 +630,9 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       ${_showTW ? `<span class="ss-match">TW ${matchPct}%</span>` : ''}
     </div>
     <div class="ss-scroll">
-      ${tailwindStr ? `<div class="ss-tw">${tailwindStr}</div>` : ''}
-      ${twUpgradeBar}
       <div class="ss-props-list"><pre class="ss-css ss-flat-list">${flatCSS}</pre>${pseudoHTML}${responsiveInline}</div>
       ${expandBtn}
+      ${tailwindStr ? `<div class="ss-tw-label">🌀 Tailwind</div><div class="ss-tw">${tailwindStr}</div>${twUpgradeBar}` : ''}
     </div>
     <div class="ss-footer">
       <div class="ss-actions">
