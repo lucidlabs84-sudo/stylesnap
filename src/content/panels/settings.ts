@@ -3,7 +3,7 @@ import { $$, stAppend, attachOutsideClose, showToast, CLOSE_X, SVG, closeHintPop
 import { S, OVERLAY_ID, FLOATING_BTN_ID } from '../state'
 import { updateSidePanel, hideSidePanel } from '../side-panel'
 import { showFeedbackModal } from './modals'
-import { getLicenseStatus, activateLicenseKey, deactivateLicenseInstance, createCheckout } from '@/lib/license'
+import { getLicenseStatus, activateLicenseKey, deactivateLicenseInstance, createCheckout, releaseAllDevices } from '@/lib/license'
 import { detectLang, translations } from '@/lib/i18n-core'
 import { showOverlay } from '../index'
 import { showHintBar } from '../hint-bar'
@@ -148,6 +148,13 @@ export async function showSettingsPopup() {
         <button id="ss-license-buy" style="margin-top:6px;${btnStyle}width:100%;">${t.upgrade || 'Upgrade to Pro — $29'}</button>
         <div style="font-size:10px;color:#64748b;margin-top:4px;text-align:center;">
           <a id="ss-license-recover" href="#" style="color:var(--ss-primary-light);text-decoration:none;cursor:pointer;">Lost your license key? Recover</a>
+        </div>
+        <div id="ss-release-block" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Activation limit reached? Enter your purchase email to free all your devices:</div>
+          <div style="display:flex;gap:6px;">
+            <input id="ss-release-email" type="email" placeholder="Purchase email" style="${inputStyle}flex:1;">
+            <button id="ss-release-btn" style="${secondaryBtnStyle}">Release</button>
+          </div>
         </div>
       ` : `
         <button id="ss-license-deactivate" style="margin-top:6px;${secondaryBtnStyle}width:100%;">${t.deactivate || 'Deactivate License'}</button>
@@ -311,6 +318,39 @@ export async function showSettingsPopup() {
       setTimeout(() => showSettingsPopup(), 500)
     } else {
       showToast(result.error || 'Activation failed')
+      // Stuck at the activation limit → offer the email-based release path.
+      if (result.limitReached) {
+        const rb = popup.querySelector('#ss-release-block') as HTMLElement | null
+        if (rb) rb.style.display = 'block'
+      }
+    }
+  })
+
+  // Force-release all devices (email-verified), then auto-retry activation
+  const releaseBtn = popup.querySelector('#ss-release-btn') as HTMLButtonElement | null
+  releaseBtn?.addEventListener('click', async function (this: HTMLButtonElement) {
+    const key = (popup.querySelector('#ss-license-key') as HTMLInputElement | null)?.value?.trim()
+    const email = (popup.querySelector('#ss-release-email') as HTMLInputElement | null)?.value?.trim()
+    if (!key) { showToast('Enter your license key first'); return }
+    if (!email) { showToast('Enter your purchase email'); return }
+    const btn = this
+    const orig = btn.textContent || 'Release'
+    btn.disabled = true; btn.textContent = '…'
+    showToast('Releasing devices…')
+    const r = await releaseAllDevices(key, email)
+    if (!r.success) { btn.disabled = false; btn.textContent = orig; showToast(r.error || 'Release failed'); return }
+    showToast(`Released ${r.released ?? 0} device(s) — activating…`)
+    const res = await activateLicenseKey(key)
+    btn.disabled = false; btn.textContent = orig
+    if (res.success) {
+      showToast('License activated!')
+      S.licenseIsPro = true
+      try { if (S.lockedElement && S.lastParsedCSS) showOverlay(S.lockedElement as Element, S.lastParsedCSS) } catch { /* */ }
+      try { if ($$('stylesnap-hint-bar')) showHintBar() } catch { /* */ }
+      popup.remove()
+      setTimeout(() => showSettingsPopup(), 500)
+    } else {
+      showToast(res.error || 'Activation failed')
     }
   })
 

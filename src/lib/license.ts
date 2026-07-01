@@ -168,6 +168,34 @@ export async function activateLicenseKey(licenseKey: string): Promise<{
 }
 
 /**
+ * Force-release every activation on a license key, proving ownership by email.
+ * Use when the local instance record is lost and the user is stuck at
+ * "activation limit reached" with no way to deactivate. Frees all slots so the
+ * user can re-activate cleanly.
+ */
+export async function releaseAllDevices(licenseKey: string, email: string): Promise<{
+  success: boolean
+  released?: number
+  error?: string
+}> {
+  const key = licenseKey.trim()
+  const em = email.trim()
+  if (!key || !em) return { success: false, error: 'License key and email are required.' }
+  try {
+    const res = await proxyFetch(`${PROXY_BASE_URL}/api/recover-deactivate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ license_key: key, email: em }),
+    })
+    const data = await res.json()
+    if (!data.deactivated) return { success: false, error: data.error || 'Release failed.' }
+    return { success: true, released: data.released ?? 0 }
+  } catch {
+    return { success: false, error: 'Service unavailable.' }
+  }
+}
+
+/**
  * Validates a License Key via DodoPayments POST /licenses/validate.
  * Optionally passes instance_id for instance-specific validation.
  * Used for periodic checks (e.g., every 24h or on startup).
