@@ -62,11 +62,17 @@ if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
     getLicenseStatus().then(s => {
       const wasPro = S.licenseIsPro
       S.licenseIsPro = s.isPro
-      // On any Pro-state change, re-render the locked overlay so it reflects the
-      // new state (unlock on activate, re-lock "Tailwind hidden / Upgrade" on
-      // deactivate) without needing a page reload.
-      if (s.isPro !== wasPro && S.lockedElement && S.lastParsedCSS) {
-        try { showOverlay(S.lockedElement as Element, S.lastParsedCSS) } catch { /* overlay not open */ }
+      // On any Pro-state change, refresh every piece of UI that reflects it,
+      // without needing a page reload:
+      if (s.isPro !== wasPro) {
+        // 1) the locked overlay (Tailwind unlock / re-lock, upgrade bar)
+        if (S.lockedElement && S.lastParsedCSS) {
+          try { showOverlay(S.lockedElement as Element, S.lastParsedCSS) } catch { /* overlay not open */ }
+        }
+        // 2) the hint bar's "Upgrade to Pro" badge (rebuild drops/adds it)
+        if ($$('stylesnap-hint-bar')) {
+          try { showHintBar() } catch { /* hint bar not shown */ }
+        }
       }
     })
   })
