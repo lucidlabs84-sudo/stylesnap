@@ -152,6 +152,14 @@ export async function activateLicenseKey(licenseKey: string): Promise<{
       activatedAt:      data.created_at || new Date().toISOString(),
     }
     await chrome.storage.local.set({ [STORAGE_KEYS.LICENSE]: payload })
+    // A successful activation is itself a successful server interaction, so seed
+    // the validation timestamp. Otherwise the first background validation with
+    // no prior timestamp would, on any transient network error, return invalid
+    // and wipe the license we just stored.
+    await chrome.storage.local.set({
+      stylesnap_last_validated_at: Date.now(),
+      stylesnap_offline_fail_count: 0,
+    })
     return { success: true }
 
   } catch (err) {

@@ -5,6 +5,8 @@ import { updateSidePanel, hideSidePanel } from '../side-panel'
 import { showFeedbackModal } from './modals'
 import { getLicenseStatus, activateLicenseKey, deactivateLicenseInstance, createCheckout } from '@/lib/license'
 import { detectLang, translations } from '@/lib/i18n-core'
+import { showOverlay } from '../index'
+import { showHintBar } from '../hint-bar'
 import { DEFAULT_SETTINGS } from '@/shared/types'
 import type { UserSettings } from '@/shared/types'
 
@@ -296,6 +298,15 @@ export async function showSettingsPopup() {
     if (result.success) {
       showToast('License activated!')
       S.licenseIsPro = true
+      // Re-render any already-open UI so Pro features unlock immediately —
+      // otherwise the locked overlay keeps showing "Tailwind hidden / Upgrade"
+      // and the hint-bar upgrade badge until the next re-lock.
+      try {
+        if (S.lockedElement && S.lastParsedCSS) showOverlay(S.lockedElement as Element, S.lastParsedCSS)
+      } catch { /* overlay not open */ }
+      try {
+        if ($$('stylesnap-hint-bar')) showHintBar()
+      } catch { /* hint bar not shown */ }
       popup.remove()
       setTimeout(() => showSettingsPopup(), 500)
     } else {
