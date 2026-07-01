@@ -834,7 +834,8 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
       ev.stopPropagation()
       const target = S.lockedElement || S.lastHighlighted
       if (!target) { showToast('Hover an element first'); return }
-      copyCurrentCSS(target)
+      // Only show the "Copied!" feedback if a copy actually happened.
+      if (!copyCurrentCSS(target)) return
       // Visual feedback: green flash + checkmark
       if (copyBtn) {
         const origHTML = copyBtn.innerHTML
@@ -1189,16 +1190,19 @@ function showCopyOptions(anchor: HTMLElement) {
   attachOutsideClose(pop, { delay: 150 })
 }
 
-function copyCurrentCSS(el: Element) {
+function copyCurrentCSS(el: Element): boolean {
   // Copy the source-preserved rule set (same as CodePen export), honoring the
   // copy options: include children, font-size→px, include HTML.
-  if (!S.licenseIsPro) { showUpgradeModal(); return }
+  // Returns false when nothing was copied (not Pro, or no CSS) so callers can
+  // skip the "Copied!" feedback.
+  if (!S.licenseIsPro) { showUpgradeModal(); return false }
   let css = getComponentCSSForExport(el, _copyChildren).trim()
-  if (!css) { showToast('No CSS to copy — hover an element first'); return }
+  if (!css) { showToast('No CSS to copy — hover an element first'); return false }
   if (_copyFontSizePx) css = remToPx(css)
   const output = _copyHtml ? `<!-- HTML -->\n${extractComponentHTML(el, 2)}\n\n/* CSS */\n${css}` : css
   navigator.clipboard.writeText(output).then(() => showToast(_copyHtml ? 'HTML + CSS copied!' : 'CSS copied!'))
     .catch(() => showToast('Copy failed'))
+  return true
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────
