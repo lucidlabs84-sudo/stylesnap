@@ -52,6 +52,25 @@ import { computePosition, flip, shift, offset, autoUpdate } from '@floating-ui/d
 // Init: load cached license
 getLicenseStatus().then(s => { S.licenseIsPro = s.isPro })
 
+// Keep the in-memory Pro flag in sync whenever the stored license changes —
+// activation from the upgrade modal, another tab, the background, or checkout.
+// Without this the flag stays stale (Pro features keep gating) until a full
+// page reload re-reads storage.
+if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.stylesnap_license) return
+    getLicenseStatus().then(s => {
+      const wasPro = S.licenseIsPro
+      S.licenseIsPro = s.isPro
+      // If we just became Pro and an element is locked, re-render so the overlay
+      // drops the "Tailwind hidden / Upgrade" state immediately.
+      if (s.isPro && !wasPro && S.lockedElement && S.lastParsedCSS) {
+        try { showOverlay(S.lockedElement as Element, S.lastParsedCSS) } catch { /* overlay not open */ }
+      }
+    })
+  })
+}
+
 
 // ─── Display format preferences ────────────────────────────────────────
 let _colorFormat: 'rgb' | 'hex' | 'hsl' = 'rgb'
