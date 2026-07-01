@@ -388,6 +388,10 @@ export async function showSettingsPopup() {
   popup.querySelector('#ss-license-deactivate')?.addEventListener('click', async () => {
     showToast('Deactivating...')
     await deactivateLicenseInstance()
+    // Reset the in-memory flag immediately (don't wait for the storage-change
+    // listener) so Pro features re-lock right away, and re-render the overlay.
+    S.licenseIsPro = false
+    try { if (S.lockedElement && S.lastParsedCSS) showOverlay(S.lockedElement as Element, S.lastParsedCSS) } catch { /* */ }
     showToast('License deactivated')
     popup.remove()
     setTimeout(() => showSettingsPopup(), 400)

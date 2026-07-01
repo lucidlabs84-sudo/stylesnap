@@ -62,9 +62,10 @@ if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
     getLicenseStatus().then(s => {
       const wasPro = S.licenseIsPro
       S.licenseIsPro = s.isPro
-      // If we just became Pro and an element is locked, re-render so the overlay
-      // drops the "Tailwind hidden / Upgrade" state immediately.
-      if (s.isPro && !wasPro && S.lockedElement && S.lastParsedCSS) {
+      // On any Pro-state change, re-render the locked overlay so it reflects the
+      // new state (unlock on activate, re-lock "Tailwind hidden / Upgrade" on
+      // deactivate) without needing a page reload.
+      if (s.isPro !== wasPro && S.lockedElement && S.lastParsedCSS) {
         try { showOverlay(S.lockedElement as Element, S.lastParsedCSS) } catch { /* overlay not open */ }
       }
     })
