@@ -913,6 +913,7 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
     aiBtn.dataset.bound = 'true'
     aiBtn.addEventListener('click', (ev) => {
       ev.stopPropagation()
+      if (!S.licenseIsPro) { showUpgradeModal(); return }
       if (!S.lockedElement) { showToast('Lock an element first'); return }
       showAIPrompt()
     })
