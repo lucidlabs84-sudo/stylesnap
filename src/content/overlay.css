@@ -211,7 +211,10 @@
   border-radius: var(--ss-radius-lg) !important;
   border: 1px solid rgba(99, 102, 241, 0.4) !important;
   box-shadow: var(--ss-shadow-panel), 0 0 0 1px rgba(99, 102, 241, 0.1) !important;
-  max-width: 360px !important;
+  /* Fixed width so the panel never gets squeezed thin when it's positioned
+     near the right edge of the viewport (it shift()s into view instead). */
+  width: 320px !important;
+  max-width: calc(100vw - 16px) !important;
   max-height: 420px !important;
   overflow: hidden !important;
   flex-direction: column !important;
@@ -648,7 +651,9 @@
   background: var(--ss-bg-card);
   pointer-events: auto !important;
 }
-#stylesnap-overlay .ss-actions { display: flex; align-items: center; gap: var(--ss-space-xs); }
+#stylesnap-overlay .ss-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--ss-space-xs); }
+/* Footer buttons never wrap their own label or shrink; the row wraps instead. */
+#stylesnap-overlay .ss-actions > button { white-space: nowrap; flex: 0 0 auto; }
 
 /* Primary action — Copy CSS. Solid fill, bolder, slightly larger: the one
    thing most users came for. Everything else recedes to ghost buttons. */
