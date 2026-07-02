@@ -37,9 +37,7 @@
   ],
   "host_permissions": [
     "<all_urls>",
-    "https://api.lucidlibs.dev/*",
-    "https://test.dodopayments.com/*",
-    "https://live.dodopayments.com/*"
+    "https://api.lucidlibs.dev/*"
   ],
   "web_accessible_resources": [
     {
