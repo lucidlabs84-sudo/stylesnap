@@ -30,7 +30,6 @@
     "storage",
     "tabs",
     "activeTab",
-    "scripting",
     "clipboardWrite",
     "notifications",
     "contextMenus"
