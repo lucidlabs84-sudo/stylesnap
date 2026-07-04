@@ -325,10 +325,12 @@ export function extractComponentHTML(el: Element, maxDepth = 5): string {
       .join(' ')
     const classAttr = classes ? ` class="${classes}"` : ''
 
-    // Copy relevant attributes (resolve relative URLs → absolute)
+    // Copy relevant attributes (resolve relative URLs → absolute).
+    // Keep inline `style` — dropping it made inline-styled elements/children
+    // render unstyled ("deformed") in the CodePen/HTML export.
     const attrs: string[] = []
     for (const attr of Array.from(node.attributes)) {
-      if (['id', 'class', 'style'].includes(attr.name)) continue
+      if (['id', 'class'].includes(attr.name)) continue
       if (attr.name.startsWith('on')) continue // skip event handlers
       if (attr.name.startsWith('data-stylesnap')) continue
       attrs.push(`${attr.name}="${resolveAttrUrl(attr.name, attr.value)}"`)
