@@ -23,7 +23,7 @@ _pageStyle.textContent = PAGE_CSS
 if (document.head) { document.head.appendChild(_pageStyle) }
 else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { document.head.appendChild(_pageStyle) }, { once: true }) }
 
-import { parseElement, extractComponentHTML, extractComponentCSS } from '@/lib/css-extractor'
+import { parseElement, extractComponentHTML, extractComponentCSS, buildStandaloneHTML } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { translations, TranslationKey } from '@/lib/i18n-core'
 import {
@@ -1202,10 +1202,18 @@ function copyCurrentCSS(el: Element): boolean {
   // Returns false when nothing was copied (not Pro, or no CSS) so callers can
   // skip the "Copied!" feedback.
   if (!S.licenseIsPro) { showUpgradeModal(); return false }
-  let css = getComponentCSSForExport(el, _copyChildren).trim()
-  if (!css) { showToast('No CSS to copy — hover an element first'); return false }
-  if (_copyFontSizePx) css = remToPx(css)
-  const output = _copyHtml ? `<!-- HTML -->\n${extractComponentHTML(el, 2)}\n\n/* CSS */\n${css}` : css
+  let output: string
+  if (_copyHtml) {
+    // "Copy with HTML" = a self-contained, faithful snapshot (styles inlined on
+    // each element) so it renders exactly like the original when pasted.
+    output = buildStandaloneHTML(el)
+  } else {
+    // Plain "Copy CSS" = readable, authored CSS for this element.
+    let css = getComponentCSSForExport(el, _copyChildren).trim()
+    if (!css) { showToast('No CSS to copy — hover an element first'); return false }
+    if (_copyFontSizePx) css = remToPx(css)
+    output = css
+  }
   navigator.clipboard.writeText(output).then(() => showToast(_copyHtml ? 'HTML + CSS copied!' : 'CSS copied!'))
     .catch(() => showToast('Copy failed'))
   return true
@@ -1651,12 +1659,12 @@ function exportCSSToCodePen() {
   const el = S.lockedElement as HTMLElement
   if (!el) return
   const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
-  let css = getComponentCSSForExport(el, _copyChildren)
-  if (_copyFontSizePx) css = remToPx(css)
+  // Faithful snapshot: every element carries its own computed styles inline, so
+  // the pen renders exactly like the original and isn't affected by page CSS.
   submitCodePen({
-    title: `StyleSnap — ${title} (CSS)`,
-    html: extractComponentHTML(el, 2),
-    css: `/* Exported by StyleSnap */\n${css}`,
+    title: `StyleSnap — ${title}`,
+    html: buildStandaloneHTML(el),
+    css: `/* Exported by StyleSnap — styles are inlined on each element for a faithful, self-contained snapshot. */\nbody { margin: 24px; background: #eee; }`,
     editors: '110',
   })
 }

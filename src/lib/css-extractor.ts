@@ -369,3 +369,137 @@ export function extractComponentHTML(el: Element, maxDepth = 5): string {
 
   return cleanNode(el, 0)
 }
+
+// ─── Faithful standalone snapshot ────────────────────────────────────────────
+// Serialize an element + subtree with each element's *meaningful* computed styles
+// inlined, for the CodePen / "Copy with HTML" export. Goal: a self-contained
+// snapshot that renders exactly like the original, independent of the page's
+// stylesheets. To stay lean and correct we (1) strip StyleSnap's own highlight
+// classes so we don't capture the lock outline/dim, and (2) diff each element
+// against a blank element of the same tag so only non-default properties are kept.
+
+const SNAPSHOT_PROPS = [
+  'box-sizing', 'display', 'position', 'top', 'right', 'bottom', 'left', 'z-index', 'float', 'clear',
+  'flex', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis', 'order',
+  'justify-content', 'align-items', 'align-self', 'align-content',
+  'gap', 'row-gap', 'column-gap',
+  'grid-template-columns', 'grid-template-rows', 'grid-auto-flow', 'grid-column', 'grid-row',
+  'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'aspect-ratio',
+  'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+  'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
+  'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+  'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+  'border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius',
+  'outline-width', 'outline-style', 'outline-color', 'outline-offset',
+  'background-color', 'background-image', 'background-size', 'background-position', 'background-repeat',
+  'box-shadow', 'opacity', 'filter', 'backdrop-filter', 'mix-blend-mode',
+  'color', 'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant',
+  'line-height', 'letter-spacing', 'word-spacing', 'text-align', 'text-decoration', 'text-transform',
+  'text-overflow', 'text-shadow', 'white-space', 'word-break', 'overflow-wrap',
+  'list-style', 'vertical-align',
+  'overflow-x', 'overflow-y',
+  'transform', 'transition', 'animation',
+  'object-fit', 'object-position', '-webkit-text-fill-color',
+]
+
+const SNAPSHOT_SKIP = new Set(['none', 'auto', 'normal', 'visible', 'static', 'rgba(0, 0, 0, 0)', 'transparent'])
+// Inheritable text props — always keep on the root so text renders faithfully
+// even though the export body won't share the page's inherited styles.
+const INHERIT_KEEP = new Set(['color', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-align', 'text-transform'])
+const SS_CLASSES = ['stylesnap-locked', 'stylesnap-highlight', 'stylesnap-preview']
+
+const _defaultCache = new Map<string, Record<string, string>>()
+function defaultStyleFor(tag: string): Record<string, string> {
+  const cached = _defaultCache.get(tag)
+  if (cached) return cached
+  const probe = document.createElement(tag)
+  probe.setAttribute('style', 'position:absolute!important;left:-99999px!important;top:0!important;width:auto!important;height:auto!important')
+  document.body.appendChild(probe)
+  const cs = window.getComputedStyle(probe)
+  const rec: Record<string, string> = {}
+  for (const p of SNAPSHOT_PROPS) rec[p] = cs.getPropertyValue(p).trim()
+  probe.remove()
+  _defaultCache.set(tag, rec)
+  return rec
+}
+
+function snapshotStyle(node: Element, isRoot: boolean): string {
+  const cs = window.getComputedStyle(node)
+  const def = defaultStyleFor(node.tagName.toLowerCase())
+  const outlineStyle = cs.getPropertyValue('outline-style').trim()
+  const colorV = cs.getPropertyValue('color').trim()
+  const decls: string[] = []
+  for (const p of SNAPSHOT_PROPS) {
+    const v = cs.getPropertyValue(p).trim()
+    if (!v || SNAPSHOT_SKIP.has(v.toLowerCase())) continue
+    if (p === 'opacity' && v === '1') continue
+    // Drop invisible border colour/style (that side's width is 0).
+    if (p.startsWith('border-') && (p.endsWith('-color') || p.endsWith('-style'))) {
+      const w = cs.getPropertyValue(`border-${p.split('-')[1]}-width`).trim()
+      if (w === '0px' || w === '') continue
+    }
+    // Drop invisible outline props, and the webkit fill colour when it equals color.
+    if (p.startsWith('outline-') && (outlineStyle === 'none' || outlineStyle === '')) continue
+    if (p === '-webkit-text-fill-color' && v === colorV) continue
+    // Keep if it differs from a blank element of the same tag, or (on the root)
+    // if it's an inheritable text property we want to pin down.
+    if ((isRoot && INHERIT_KEEP.has(p)) || v !== def[p]) decls.push(`${p}: ${v}`)
+  }
+  return decls.join('; ')
+}
+
+const SNAPSHOT_SELF_CLOSING = new Set(['img', 'input', 'br', 'hr', 'source', 'area', 'base', 'col', 'embed', 'track', 'wbr'])
+
+export function buildStandaloneHTML(root: Element, maxDepth = 8): string {
+  // Temporarily remove StyleSnap's highlight/lock classes across the subtree so
+  // computed styles reflect the real component, not the injected outline/dim.
+  const restore: Array<{ el: Element; cls: string[] }> = []
+  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    const removed = SS_CLASSES.filter(c => el.classList.contains(c))
+    if (removed.length) { el.classList.remove(...removed); restore.push({ el, cls: removed }) }
+  }
+
+  function walk(node: Element, depth: number): string {
+    if (depth > maxDepth) return ''
+    const tag = node.tagName.toLowerCase()
+    if (tag === 'style' || tag === 'script') return ''
+    if (tag === 'link' && node.getAttribute('rel') === 'stylesheet') return ''
+
+    const cls = Array.from(node.classList).filter(c => !c.startsWith('stylesnap-')).join(' ')
+    const classAttr = cls ? ` class="${cls}"` : ''
+    const style = snapshotStyle(node, depth === 0)
+    const styleAttr = style ? ` style="${style.replace(/"/g, '&quot;')}"` : ''
+
+    const attrs: string[] = []
+    for (const attr of Array.from(node.attributes)) {
+      if (['class', 'style', 'id'].includes(attr.name)) continue
+      if (attr.name.startsWith('on') || attr.name.startsWith('data-stylesnap')) continue
+      attrs.push(`${attr.name}="${resolveAttrUrl(attr.name, attr.value)}"`)
+    }
+    const attrStr = attrs.length ? ' ' + attrs.join(' ') : ''
+    const indent = '  '.repeat(depth)
+
+    if (SNAPSHOT_SELF_CLOSING.has(tag)) return `${indent}<${tag}${classAttr}${styleAttr}${attrStr} />`
+
+    const children = Array.from(node.children).map(c => walk(c, depth + 1)).filter(Boolean).join('\n')
+    const text = Array.from(node.childNodes)
+      .filter(n => n.nodeType === 3).map(n => n.textContent?.trim()).filter(Boolean).join(' ')
+
+    let out: string
+    if (children && text) out = `${indent}<${tag}${classAttr}${styleAttr}${attrStr}>\n${children}\n${indent}  ${text}\n${indent}</${tag}>`
+    else {
+      const content = children || text
+      if (!content) out = `${indent}<${tag}${classAttr}${styleAttr}${attrStr}></${tag}>`
+      else if (children) out = `${indent}<${tag}${classAttr}${styleAttr}${attrStr}>\n${children}\n${indent}</${tag}>`
+      else out = `${indent}<${tag}${classAttr}${styleAttr}${attrStr}>${content}</${tag}>`
+    }
+    return out
+  }
+
+  try {
+    return walk(root, 0)
+  } finally {
+    for (const { el, cls } of restore) el.classList.add(...cls)
+  }
+}
