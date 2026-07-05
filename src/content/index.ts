@@ -23,7 +23,7 @@ _pageStyle.textContent = PAGE_CSS
 if (document.head) { document.head.appendChild(_pageStyle) }
 else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { document.head.appendChild(_pageStyle) }, { once: true }) }
 
-import { parseElement, extractComponentHTML, extractComponentCSS, buildStandaloneHTML } from '@/lib/css-extractor'
+import { parseElement, extractComponentHTML, extractComponentCSS, buildExportMarkup } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { translations, TranslationKey } from '@/lib/i18n-core'
 import {
@@ -1204,9 +1204,11 @@ function copyCurrentCSS(el: Element): boolean {
   if (!S.licenseIsPro) { showUpgradeModal(); return false }
   let output: string
   if (_copyHtml) {
-    // "Copy with HTML" = a self-contained, faithful snapshot (styles inlined on
-    // each element) so it renders exactly like the original when pasted.
-    output = buildStandaloneHTML(el)
+    // "Copy with HTML" = clean real markup + the page's authored CSS in a <style>
+    // block, so it's readable AND renders faithfully when pasted (CSS-Scan style).
+    let css = getComponentCSSForExport(el, _copyChildren, true).trim()
+    if (_copyFontSizePx) css = remToPx(css)
+    output = `${buildExportMarkup(el)}\n\n<style>\n${css}\n</style>`
   } else {
     // Plain "Copy CSS" = readable, authored CSS for this element.
     let css = getComponentCSSForExport(el, _copyChildren).trim()
@@ -1431,7 +1433,7 @@ function onKeyDown(e: KeyboardEvent) {
 
 // ─── CodePen Export Helpers ─────────────────────────────────────────
 
-function getComponentCSSForExport(el: Element, includeChildren = true): string {
+function getComponentCSSForExport(el: Element, includeChildren = true, emitInherited = false): string {
   const { rules, mediaRules, pseudoRules } = getComponentCSS(el)
 
   // Resolve CSS custom properties (var()) using computed style
@@ -1555,6 +1557,18 @@ function getComponentCSSForExport(el: Element, includeChildren = true): string {
   // Helper so the element is visible against a transparent/white background.
   cssLines.push(`body {\n  background: #eee;\n  /* Helper in case the element has a transparent background or white text. */\n}`)
 
+  // Inherited context — the export body won't share the page's inherited styles,
+  // so pin the root's key text props (matches the `inherited-styles-for-exported-element`
+  // class added to the exported markup) so text renders faithfully. CSS-Scan style.
+  if (emitInherited) {
+    const inh: string[] = []
+    for (const p of ['color', 'font-family', 'font-size']) {
+      const v = computedEl.getPropertyValue(p).trim()
+      if (v) inh.push(`  ${p}: ${v};`)
+    }
+    if (inh.length) cssLines.push(`.inherited-styles-for-exported-element {\n${inh.join('\n')}\n}`)
+  }
+
   // :root block with all custom properties (at the top so they're available)
   if (Object.keys(rootCustomProps).length > 0) {
     const rootLines = Object.entries(rootCustomProps).map(([k, v]) => `  ${k}: ${v};`)
@@ -1659,12 +1673,12 @@ function exportCSSToCodePen() {
   const el = S.lockedElement as HTMLElement
   if (!el) return
   const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
-  // Faithful snapshot: every element carries its own computed styles inline, so
-  // the pen renders exactly like the original and isn't affected by page CSS.
+  // Clean real markup in the HTML pane + the page's authored CSS in the CSS pane —
+  // readable and faithful, unaffected by re-rendering (CSS-Scan style).
   submitCodePen({
     title: `StyleSnap — ${title}`,
-    html: buildStandaloneHTML(el),
-    css: `/* Exported by StyleSnap — styles are inlined on each element for a faithful, self-contained snapshot. */\nbody { margin: 24px; background: #eee; }`,
+    html: buildExportMarkup(el),
+    css: getComponentCSSForExport(el, true, true),
     editors: '110',
   })
 }
