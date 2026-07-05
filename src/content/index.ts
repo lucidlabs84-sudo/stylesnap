@@ -848,7 +848,11 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
         copyBtn.style.background = 'rgba(52, 211, 153, 0.25)'
         copyBtn.style.borderColor = 'rgba(52, 211, 153, 0.5)'
         copyBtn.style.color = '#34d399'
-        copyBtn.innerHTML = `<svg ${SVG} width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> Copied!`
+        // Keep the button's own label so its width doesn't change (a longer
+        // "Copied!" pushed the footer row to wrap to two lines). Just swap the
+        // icon to a check + flash green.
+        const label = copyBtn.textContent?.trim() || 'CSS'
+        copyBtn.innerHTML = `<svg ${SVG} width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> ${label}`
         setTimeout(() => {
           copyBtn.innerHTML = origHTML
           copyBtn.style.background = origBg
@@ -885,7 +889,9 @@ export function showOverlay(el: Element, parsedCSS: ParsedCSS) {
         twCopyBtn.style.background = 'rgba(52, 211, 153, 0.25)'
         twCopyBtn.style.borderColor = 'rgba(52, 211, 153, 0.5)'
         twCopyBtn.style.color = '#34d399'
-        twCopyBtn.innerHTML = `<svg ${SVG} width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> Copied!`
+        // Keep the label ("TW") so the button width — and the footer row — don't shift.
+        const twLabel = twCopyBtn.textContent?.trim() || 'TW'
+        twCopyBtn.innerHTML = `<svg ${SVG} width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg> ${twLabel}`
         setTimeout(() => {
           twCopyBtn.innerHTML = origHTML
           twCopyBtn.style.background = ''
