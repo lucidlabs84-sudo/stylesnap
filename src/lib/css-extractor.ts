@@ -310,64 +310,13 @@ function resolveAttrUrl(name: string, value: string): string {
 }
 
 /**
- * Get simplified HTML of an element (without scripts, with inline classes)
+ * Get simplified HTML of an element (without scripts, with inline classes).
+ * Delegates to the shared serializer so text/element nodes stay in document
+ * order and preformatted whitespace is preserved (the old bespoke walker dumped
+ * text nodes after element children, corrupting interleaved content).
  */
 export function extractComponentHTML(el: Element, maxDepth = 5): string {
-  function cleanNode(node: Element, depth: number): string {
-    if (depth > maxDepth) return ''
-    if (node.tagName === 'STYLE' || node.tagName === 'SCRIPT') return '' // skip style/script tags — CSS goes in CSS tab
-    if (node.tagName === 'LINK' && node.getAttribute('rel') === 'stylesheet') return '' // skip link stylesheets
-
-    const tag = node.tagName.toLowerCase()
-    const id = node.id ? ` id="${node.id}"` : ''
-    const classes = Array.from(node.classList)
-      .filter(c => !c.startsWith('stylesnap-'))
-      .join(' ')
-    const classAttr = classes ? ` class="${classes}"` : ''
-
-    // Copy relevant attributes (resolve relative URLs → absolute).
-    // Keep inline `style` — dropping it made inline-styled elements/children
-    // render unstyled ("deformed") in the CodePen/HTML export.
-    const attrs: string[] = []
-    for (const attr of Array.from(node.attributes)) {
-      if (['id', 'class'].includes(attr.name)) continue
-      if (attr.name.startsWith('on')) continue // skip event handlers
-      if (attr.name.startsWith('data-stylesnap')) continue
-      attrs.push(`${attr.name}="${resolveAttrUrl(attr.name, attr.value)}"`)
-    }
-    const attrStr = attrs.length ? ' ' + attrs.join(' ') : ''
-
-    const selfClosing = ['img', 'input', 'br', 'hr', 'link', 'meta', 'area', 'base', 'col', 'embed', 'param', 'source', 'track', 'wbr']
-    if (selfClosing.includes(tag)) {
-      return `<${tag}${id}${classAttr}${attrStr} />`
-    }
-
-    const children = Array.from(node.children)
-      .map(child => cleanNode(child, depth + 1))
-      .filter(Boolean)
-      .join('\n')
-
-    // Collect text nodes (even when mixed with child elements)
-    const textNodes = Array.from(node.childNodes)
-      .filter(n => n.nodeType === 3) // TEXT_NODE
-      .map(n => n.textContent?.trim())
-      .filter(Boolean)
-      .join(' ')
-    const text = textNodes || ''
-
-    const content = children || text
-    const indent = '  '.repeat(depth)
-    if (children && text) {
-      // Mixed: children + inline text (like <a><svg/> text</a>)
-      return `${indent}<${tag}${id}${classAttr}${attrStr}>\n${children}\n${text}\n${indent}</${tag}>`
-    }
-
-    if (!content) return `${indent}<${tag}${id}${classAttr}${attrStr}></${tag}>`
-
-    return `${indent}<${tag}${id}${classAttr}${attrStr}>\n${content}\n${indent}</${tag}>`
-  }
-
-  return cleanNode(el, 0)
+  return buildExportMarkup(el, maxDepth, false)
 }
 
 // ─── Faithful component export (clean markup) ────────────────────────────────
@@ -474,6 +423,9 @@ function exportSerialize(node: Element, depth: number, isRoot: boolean, maxDepth
 }
 
 // Build clean, faithful export markup for the locked element + subtree.
-export function buildExportMarkup(root: Element, maxDepth = 12): string {
-  return exportSerialize(root, 0, true, maxDepth)
+// `rootMarker` adds the `inherited-styles-for-exported-element` class to the root
+// (used by the CodePen / Copy-with-HTML export, which pairs it with an inherited
+// CSS block); leave it off for a plain component snapshot.
+export function buildExportMarkup(root: Element, maxDepth = 12, rootMarker = true): string {
+  return exportSerialize(root, 0, rootMarker, maxDepth)
 }
