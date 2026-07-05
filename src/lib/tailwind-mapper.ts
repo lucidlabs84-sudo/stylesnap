@@ -382,6 +382,49 @@ function boxShorthand(p: string, v: string): string | null {
   return cls.length ? cls.join(' ') : null
 }
 
+// Split a value on top-level whitespace, keeping parenthesised groups intact
+// (so `1px solid rgb(0, 0, 0)` → ['1px','solid','rgb(0, 0, 0)'], not split mid-rgb).
+function splitTopLevel(v: string): string[] {
+  const out: string[] = []
+  let depth = 0, cur = ''
+  for (const ch of v) {
+    if (ch === '(') depth++
+    else if (ch === ')') depth--
+    if (/\s/.test(ch) && depth === 0) { if (cur) { out.push(cur); cur = '' } }
+    else cur += ch
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
+const BORDER_STYLES = new Set(['solid', 'dashed', 'dotted', 'double', 'none', 'hidden', 'groove', 'ridge', 'inset', 'outset'])
+
+// Expand a `border`/`outline` shorthand into width + style + color classes.
+function borderShorthand(prefix: 'border' | 'outline', v: string): string | null {
+  const t = v.trim()
+  if (t === '0' || t === '0px' || t === 'none') return prefix === 'border' ? 'border-0' : 'outline-none'
+  let width: string | undefined, style: string | undefined, color: string | undefined
+  for (const tok of splitTopLevel(t)) {
+    if (BORDER_STYLES.has(tok)) style = tok
+    else if (/^[\d.]+(px|em|rem)$/.test(tok) || tok === 'thin' || tok === 'medium' || tok === 'thick') width = tok
+    else color = color ? `${color} ${tok}` : tok
+  }
+  const out: (string | null)[] = []
+  if (width) {
+    const px = parsePx(width) ?? ({ thin: 1, medium: 3, thick: 5 } as Record<string, number>)[width]
+    const wmap: Record<number, string> = prefix === 'border'
+      ? { 0: 'border-0', 1: 'border', 2: 'border-2', 4: 'border-4', 8: 'border-8' }
+      : { 0: 'outline-0', 1: 'outline-1', 2: 'outline-2', 4: 'outline-4', 8: 'outline-8' }
+    out.push(px != null && wmap[px] ? wmap[px] : `${prefix}-[${width}]`)
+  } else {
+    out.push(prefix === 'border' ? 'border' : 'outline')
+  }
+  if (style && style !== 'solid') out.push(`${prefix}-${style}`)
+  if (color) out.push(colorClass(prefix, color))
+  const cls = out.filter(Boolean)
+  return cls.length ? cls.join(' ') : null
+}
+
 // ─── Property mappers ─────────────────────────────────────────────────
 
 const DISPLAY_MAP: Record<string, string> = {
@@ -571,6 +614,34 @@ const PROPERTY_MAPPERS: Record<string, MappingFn> = {
   },
   'border-color': (v) => colorClass('border', v),
   'outline-color': (v) => colorClass('outline', v),
+
+  // Shorthands
+  border: (v) => borderShorthand('border', v),
+  outline: (v) => borderShorthand('outline', v),
+  // `background` shorthand — a plain color, gradient, or url() all map via
+  // colorClass (its arbitrary-value fallback wraps gradient/url in bg-[...]).
+  background: (v) => {
+    if (v === 'none') return null
+    return colorClass('bg', v)
+  },
+  // `font` shorthand (e.g. `italic 700 16px/1.5 Arial`) — pull out the size and
+  // the family; weight/style are emitted when present. Best-effort, returns what
+  // it can parse.
+  font: (v) => {
+    const parts: string[] = []
+    const sizeMatch = v.match(/(\d*\.?\d+(?:px|rem|em))(?:\s*\/\s*\S+)?/)
+    if (sizeMatch) {
+      const px = parsePx(sizeMatch[1])
+      parts.push(px && FONT_SIZE_MAP[px] ? FONT_SIZE_MAP[px] : `text-[${sizeMatch[1]}]`)
+    }
+    if (/\bitalic\b/.test(v)) parts.push('italic')
+    const weightMatch = v.match(/\b([1-9]00)\b/)
+    if (weightMatch && FONT_WEIGHT_MAP[weightMatch[1]]) parts.push(FONT_WEIGHT_MAP[weightMatch[1]])
+    if (/\bserif\b/.test(v) && !/sans-serif/.test(v)) parts.push('font-serif')
+    else if (/sans-serif|\bsans\b/.test(v)) parts.push('font-sans')
+    else if (/\bmono(space)?\b/.test(v)) parts.push('font-mono')
+    return parts.length ? parts.join(' ') : null
+  },
 
   // Typography
   'font-size': (v) => {
