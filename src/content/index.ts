@@ -1667,11 +1667,15 @@ function exportCSSToCodePen() {
   if (!el) return
   const title = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
   // Clean real markup in the HTML pane + the page's authored CSS in the CSS pane —
-  // readable and faithful, unaffected by re-rendering (CSS-Scan style).
+  // readable and faithful, unaffected by re-rendering (CSS-Scan style). The pen is
+  // self-contained, so children/inherited are always on; honor the font-size→px
+  // copy option so it matches Copy CSS.
+  let css = getComponentCSSForExport(el, true, true)
+  if (_copyFontSizePx) css = remToPx(css)
   submitCodePen({
     title: `StyleSnap — ${title}`,
     html: buildExportMarkup(el),
-    css: getComponentCSSForExport(el, true, true),
+    css,
     editors: '110',
   })
 }
