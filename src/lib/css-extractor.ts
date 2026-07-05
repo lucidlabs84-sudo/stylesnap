@@ -409,6 +409,47 @@ const SNAPSHOT_SKIP = new Set(['none', 'auto', 'normal', 'visible', 'static', 'r
 const INHERIT_KEEP = new Set(['color', 'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'text-align', 'text-transform'])
 const SS_CLASSES = ['stylesnap-locked', 'stylesnap-highlight', 'stylesnap-preview']
 
+// Props that must NOT be pinned from computed values unless the author set them
+// explicitly. `width/height/min/max` from computed pins a content-derived size
+// (breaks natural layout → text wraps); `transform` from computed can capture a
+// running-animation frame (→ scaled/distorted). Only emit these when the author
+// (a stylesheet rule or inline style) actually declared them.
+const AUTHORED_ONLY = new Set([
+  'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height', 'flex-basis', 'transform',
+])
+
+// Collect the property names the author explicitly set on `el` — from inline
+// style plus any matching *static* stylesheet rule (interaction pseudo-states
+// like :hover and pseudo-elements are ignored so we don't count a hover-only
+// transform as authored). Cross-origin sheets that throw on access are skipped.
+function matchesStatic(el: Element, selectorText: string): boolean {
+  return selectorText.split(',').some((s) => {
+    const sel = s.trim()
+    if (!sel || /:hover|:focus|:active|:visited|:target|::/.test(sel)) return false
+    try { return el.matches(sel) } catch { return false }
+  })
+}
+function collectAuthored(rules: CSSRuleList, el: Element, set: Set<string>): void {
+  for (const r of Array.from(rules)) {
+    if (r instanceof CSSStyleRule) {
+      if (matchesStatic(el, r.selectorText)) for (let i = 0; i < r.style.length; i++) set.add(r.style[i])
+    } else if (r instanceof CSSMediaRule || r instanceof CSSSupportsRule) {
+      collectAuthored(r.cssRules, el, set)
+    }
+  }
+}
+function authoredProps(el: Element): Set<string> {
+  const set = new Set<string>()
+  const inline = el.getAttribute('style')
+  if (inline) for (const d of inline.split(';')) { const k = d.split(':')[0].trim().toLowerCase(); if (k) set.add(k) }
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList | null = null
+    try { rules = sheet.cssRules } catch { continue }
+    if (rules) collectAuthored(rules, el, set)
+  }
+  return set
+}
+
 const _defaultCache = new Map<string, Record<string, string>>()
 function defaultStyleFor(tag: string): Record<string, string> {
   const cached = _defaultCache.get(tag)
@@ -424,13 +465,16 @@ function defaultStyleFor(tag: string): Record<string, string> {
   return rec
 }
 
-function snapshotStyle(node: Element, isRoot: boolean): string {
+function snapshotStyle(node: Element, isRoot: boolean, authored: Set<string>): string {
   const cs = window.getComputedStyle(node)
   const def = defaultStyleFor(node.tagName.toLowerCase())
   const outlineStyle = cs.getPropertyValue('outline-style').trim()
   const colorV = cs.getPropertyValue('color').trim()
   const decls: string[] = []
   for (const p of SNAPSHOT_PROPS) {
+    // Size + transform: only emit when the author explicitly declared them, so we
+    // never pin a content-derived width (→ wrapping) or an animation-frame transform.
+    if (AUTHORED_ONLY.has(p) && !authored.has(p)) continue
     const v = cs.getPropertyValue(p).trim()
     if (!v || SNAPSHOT_SKIP.has(v.toLowerCase())) continue
     if (p === 'opacity' && v === '1') continue
@@ -468,7 +512,7 @@ export function buildStandaloneHTML(root: Element, maxDepth = 8): string {
 
     const cls = Array.from(node.classList).filter(c => !c.startsWith('stylesnap-')).join(' ')
     const classAttr = cls ? ` class="${cls}"` : ''
-    const style = snapshotStyle(node, depth === 0)
+    const style = snapshotStyle(node, depth === 0, authoredProps(node))
     const styleAttr = style ? ` style="${style.replace(/"/g, '&quot;')}"` : ''
 
     const attrs: string[] = []
