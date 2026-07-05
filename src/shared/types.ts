@@ -9,10 +9,6 @@ export type CSSPropertyMap = Record<string, string>
 export interface ParsedCSS {
   selector?: string
   styles: CSSPropertyMap
-  /** Clean HTML of the element (events stripped) */
-  html?: string
-  /** Recursive component CSS (child elements included) */
-  componentCSS?: string
   tailwindClasses?: string[]
   tailwindMatchRate?: number
 

@@ -237,7 +237,6 @@ export function parseElement(el: Element): ParsedCSS {
   const result: ParsedCSS = {
     selector,
     styles,
-    html: el.outerHTML.slice(0, 500),   // light preview
     tailwindClasses: tailwindResult.classes,
     tailwindMatchRate: tailwindResult.matchRate,
   }
@@ -254,28 +253,6 @@ export function parseElement(el: Element): ParsedCSS {
   }
 
   return result
-}
-
-/**
- * Extract CSS for a component (element + all descendants)
- */
-export function extractComponentCSS(el: Element, maxDepth = 5): string {
-  const lines: string[] = []
-
-  function traverse(node: Element, depth: number) {
-    if (depth > maxDepth) return
-    const styles = extractComputedCSS(node)
-    if (Object.keys(styles).length > 0) {
-      const sel = getSelector(node)
-      lines.push(formatCSS(styles, sel))
-    }
-    for (const child of Array.from(node.children)) {
-      traverse(child, depth + 1)
-    }
-  }
-
-  traverse(el, 0)
-  return lines.join('\n\n')
 }
 
 // URL resolution helpers — convert relative paths to absolute
@@ -307,16 +284,6 @@ function resolveAttrUrl(name: string, value: string): string {
     if (!base) return value
     return name === 'srcset' ? resolveSrcset(value, base) : resolveUrl(value, base)
   } catch { return value }
-}
-
-/**
- * Get simplified HTML of an element (without scripts, with inline classes).
- * Delegates to the shared serializer so text/element nodes stay in document
- * order and preformatted whitespace is preserved (the old bespoke walker dumped
- * text nodes after element children, corrupting interleaved content).
- */
-export function extractComponentHTML(el: Element, maxDepth = 5): string {
-  return buildExportMarkup(el, maxDepth, false)
 }
 
 // ─── Faithful component export (clean markup) ────────────────────────────────

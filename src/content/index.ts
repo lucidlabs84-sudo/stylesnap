@@ -23,7 +23,7 @@ _pageStyle.textContent = PAGE_CSS
 if (document.head) { document.head.appendChild(_pageStyle) }
 else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { document.head.appendChild(_pageStyle) }, { once: true }) }
 
-import { parseElement, extractComponentHTML, extractComponentCSS, buildExportMarkup } from '@/lib/css-extractor'
+import { parseElement, buildExportMarkup } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'
 import { translations, TranslationKey } from '@/lib/i18n-core'
 import {
@@ -1026,7 +1026,7 @@ function getComponentCSS(el: Element): ComponentCSS {
   // Build tree: ONLY locked element + descendants (NO ancestors — that's CSS Scan's approach)
   const treeNodes: Element[] = [el]
   function walkChildren(node: Element, depth: number) {
-    if (depth > 3) return
+    if (depth > 8) return
     for (const child of Array.from(node.children)) { treeNodes.push(child); walkChildren(child, depth + 1) }
   }
   walkChildren(el, 1)
@@ -1121,27 +1121,20 @@ function getComponentCSS(el: Element): ComponentCSS {
     } catch (_) {}
   }
 
-  // Deduplicate: sort rules by complexity (simpler first), skip only if
-  // both property AND value are identical (override with different value = keep)
+  // Order rules by selector complexity (simpler first) for readable output.
+  // NOTE: each selector keeps its OWN full declaration block — we must NOT dedup
+  // property:value pairs across different selectors, since e.g. `.supported-browsers`
+  // and `#clock div` both legitimately need `display: flex`; dropping it from one
+  // because another already declared it silently breaks that element's layout.
   const sortedSels = Array.from(rules.keys()).sort((a, b) => {
     const ca = a.split('.').length + a.split('#').length + (a.includes('>') ? 1 : 0) + (a.includes(' ') ? 1 : 0)
     const cb = b.split('.').length + b.split('#').length + (b.includes('>') ? 1 : 0) + (b.includes(' ') ? 1 : 0)
     return ca - cb || a.length - b.length
   })
-  const seenKV = new Set<string>()
-  const deduped = new Map<string, Record<string, string>>()
-  for (const sel of sortedSels) {
-    const props = rules.get(sel)!
-    const clean: Record<string, string> = {}
-    for (const [k, v] of Object.entries(props)) {
-      if (seenKV.has(`${k}:${v}`)) continue
-      clean[k] = v
-      seenKV.add(`${k}:${v}`)
-    }
-    if (Object.keys(clean).length > 0) deduped.set(sel, clean)
-  }
+  const ordered = new Map<string, Record<string, string>>()
+  for (const sel of sortedSels) ordered.set(sel, rules.get(sel)!)
 
-  return { rules: deduped, mediaRules, pseudoRules }
+  return { rules: ordered, mediaRules, pseudoRules }
 }
 
 // ─── Copy CSS ─────────────────────────────────────────────────────────
@@ -1316,8 +1309,6 @@ function onClick(e: MouseEvent) {
           id: el.id,
           classList: Array.from(el.classList).filter(c => !c.startsWith('stylesnap-')),
           rect: { width: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height) },
-          componentHTML: extractComponentHTML(el, 3),
-          componentCSS: extractComponentCSS(el, 3),
         },
       }).catch(() => {})
     }
@@ -1327,8 +1318,6 @@ function onClick(e: MouseEvent) {
   lockElement(el)
 
   const parsedCSS = parseElement(el)
-  const componentHTML = extractComponentHTML(el, 3)
-  const componentCSS = extractComponentCSS(el, 3)
 
   showOverlay(el, parsedCSS)
   refreshGuides(null)
@@ -1341,8 +1330,6 @@ function onClick(e: MouseEvent) {
       id: el.id,
       classList: Array.from(el.classList).filter(c => !c.startsWith('stylesnap-')),
       rect: { width: Math.round(el.getBoundingClientRect().width), height: Math.round(el.getBoundingClientRect().height), top: Math.round(el.getBoundingClientRect().top), left: Math.round(el.getBoundingClientRect().left) },
-      componentHTML,
-      componentCSS,
     },
   }).catch(() => {})
 }
