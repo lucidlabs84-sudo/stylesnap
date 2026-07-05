@@ -87,6 +87,10 @@ let _overlaySide: 'left' | 'right' = 'right'
 let _copyChildren = true
 let _copyFontSizePx = false
 let _copyHtml = false
+// Close handle for the copy-options popover, so we can dismiss it when the
+// cursor moves onto the page or the view scrolls (it's fixed-positioned and
+// would otherwise sit orphaned in place).
+let _copyOptsClose: (() => void) | null = null
 
 function reloadFormatSettings() {
   chrome.storage.local.get(['stylesnap_settings'], (res) => {
@@ -1154,7 +1158,7 @@ function remToPx(css: string): string {
 /** Small popover with the 3 copy options, anchored under the ⌄ button. */
 function showCopyOptions(anchor: HTMLElement) {
   const existing = $$('stylesnap-copy-opts')
-  if (existing) { existing.remove(); return }
+  if (existing) { _copyOptsClose?.(); return }
   const pop = document.createElement('div')
   pop.id = 'stylesnap-copy-opts'
   pop.setAttribute('data-stylesnap', 'true')
@@ -1192,7 +1196,7 @@ function showCopyOptions(anchor: HTMLElement) {
     })
   }
   pop.querySelectorAll('input').forEach(cb => cb.addEventListener('change', save))
-  attachOutsideClose(pop, { delay: 150 })
+  _copyOptsClose = attachOutsideClose(pop, { delay: 150, esc: true, onClose: () => { _copyOptsClose = null } })
 }
 
 function copyCurrentCSS(el: Element): boolean {
@@ -1241,6 +1245,10 @@ function handleMouseMove(e: MouseEvent) {
   // Bug 5: iframe cross-origin check – skip elements inside iframes
   if (el && el.ownerDocument !== document) return
   if (!el || el.closest('[data-stylesnap]')) return
+
+  // Cursor moved onto the page (not over StyleSnap UI) → dismiss the fixed
+  // copy-options popover so it doesn't linger orphaned.
+  _copyOptsClose?.()
 
   // If an element is locked, show preview dashed outline on other elements
   // (but keep overlay frozen on the locked element)
@@ -1682,6 +1690,7 @@ function exportCSSToCodePen() {
 
 function onScroll() {
   if (!isActive()) return
+  _copyOptsClose?.()  // fixed-anchored popover would drift out of place on scroll
   refreshGuides(S.lastHighlighted)  // re-anchor lock + hover sets to current rects
 }
 
