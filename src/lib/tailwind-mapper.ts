@@ -307,12 +307,31 @@ function parseColorToHex(val: string): { hex: string; alpha?: number } | null {
 }
 
 // Convert color to Tailwind color class
+// Common CSS named colors → hex, so keyword colors (e.g. `color: green`) map to
+// a palette/arbitrary class instead of falling through as unmatched.
+const NAMED_COLORS: Record<string, string> = {
+  black: '#000000', white: '#ffffff', red: '#ff0000', green: '#008000', blue: '#0000ff',
+  yellow: '#ffff00', orange: '#ffa500', purple: '#800080', gray: '#808080', grey: '#808080',
+  silver: '#c0c0c0', gold: '#ffd700', pink: '#ffc0cb', brown: '#a52a2a', cyan: '#00ffff',
+  aqua: '#00ffff', magenta: '#ff00ff', fuchsia: '#ff00ff', lime: '#00ff00', navy: '#000080',
+  teal: '#008080', olive: '#808000', maroon: '#800000', indigo: '#4b0082', violet: '#ee82ee',
+  coral: '#ff7f50', salmon: '#fa8072', khaki: '#f0e68c', crimson: '#dc143c', tomato: '#ff6347',
+  turquoise: '#40e0d0', skyblue: '#87ceeb', slategray: '#708090', slategrey: '#708090',
+  darkgray: '#a9a9a9', darkgrey: '#a9a9a9', lightgray: '#d3d3d3', lightgrey: '#d3d3d3',
+  dodgerblue: '#1e90ff', royalblue: '#4169e1', steelblue: '#4682b4', forestgreen: '#228b22',
+  seagreen: '#2e8b57', hotpink: '#ff69b4', chocolate: '#d2691e', beige: '#f5f5dc', ivory: '#fffff0',
+  rebeccapurple: '#663399',
+}
+
 function colorClass(prefix: string, val: string): string | null {
   if (!val || val === 'transparent' || val === 'rgba(0, 0, 0, 0)') {
     return `${prefix}-transparent`
   }
   if (val === 'currentColor' || val === 'currentcolor') return `${prefix}-current`
   if (val === 'inherit') return `${prefix}-inherit`
+  // Resolve a CSS keyword color to hex, then fall through to the hex handling.
+  const named = NAMED_COLORS[val.toLowerCase()]
+  if (named) val = named
 
   // Try parseColorToHex first (handles rgb/rgba/hsl/hsla in all syntaxes)
   const parsed = parseColorToHex(val)
@@ -344,6 +363,23 @@ function colorClass(prefix: string, val: string): string | null {
   }
 
   return null
+}
+
+// Expand a margin/padding shorthand (1–4 values) into Tailwind per-side classes.
+// 1: p-{a} · 2: py-{a} px-{b} · 3: pt-{a} px-{b} pb-{c} · 4: pt-{a} pr-{b} pb-{c} pl-{d}.
+// Zero sides are dropped (they're the default). Returns a space-joined class string.
+function boxShorthand(p: string, v: string): string | null {
+  const t = v.trim()
+  if (!t || t === '0px' || t === '0') return null
+  const parts = t.split(/\s+/)
+  if (parts.length === 1) return spacingClass(p, parts[0])
+  const side = (pref: string, val: string) => (val === '0px' || val === '0') ? null : spacingClass(pref, val)
+  let out: (string | null)[]
+  if (parts.length === 2) out = [side(p + 'y', parts[0]), side(p + 'x', parts[1])]
+  else if (parts.length === 3) out = [side(p + 't', parts[0]), side(p + 'x', parts[1]), side(p + 'b', parts[2])]
+  else out = [side(p + 't', parts[0]), side(p + 'r', parts[1]), side(p + 'b', parts[2]), side(p + 'l', parts[3])]
+  const cls = out.filter(Boolean)
+  return cls.length ? cls.join(' ') : null
 }
 
 // ─── Property mappers ─────────────────────────────────────────────────
@@ -506,22 +542,10 @@ const PROPERTY_MAPPERS: Record<string, MappingFn> = {
   },
   'max-height': (v) => v === 'none' ? null : spacingClass('max-h', v),
 
-  // Spacing — shorthand
-  margin: (v) => {
-    if (v === '0px') return null
-    if (v === 'auto') return 'm-auto'
-    const parts = v.split(' ')
-    if (parts.length === 1) return spacingClass('m', v)
-    if (parts.length === 2 && parts[0] === parts[1]) return spacingClass('m', parts[0])
-    return `m-[${v}]`
-  },
-  padding: (v) => {
-    if (v === '0px') return null
-    const parts = v.split(' ')
-    if (parts.length === 1) return spacingClass('p', v)
-    if (parts.length === 2 && parts[0] === parts[1]) return spacingClass('p', parts[0])
-    return `p-[${v}]`
-  },
+  // Spacing — shorthand (expand N-value shorthands into per-side classes; a bare
+  // `p-[0px 25px]` is invalid Tailwind — arbitrary values can't contain spaces).
+  margin: (v) => v === 'auto' ? 'm-auto' : boxShorthand('m', v),
+  padding: (v) => boxShorthand('p', v),
 
   // Individual spacing
   'margin-top': (v) => v === '0px' ? null : spacingClass('mt', v),
