@@ -1045,18 +1045,36 @@ function getComponentCSS(el: Element): ComponentCSS {
   const mediaRules: ComponentCSS['mediaRules'] = []
   const pseudoRules: ComponentCSS['pseudoRules'] = []
 
+  function isUniversalOnlySelector(selector: string): boolean {
+    const normalized = selector
+      .replace(/\s+/g, '')
+      .replace(/:where\(([^)]*)\)/g, '$1')
+      .replace(/:is\(([^)]*)\)/g, '$1')
+      .replace(/:+(hover|focus|active|visited|link|target|focus-visible|focus-within)/g, '')
+    if (!normalized) return false
+    return /^(?:\*?(?:::(?:before|after|backdrop)|:(?:before|after))?)$/.test(normalized)
+  }
+
+  function filterLowValueSelectorParts(selector: string): string[] {
+    const parts = selector.split(',').map(s => s.trim()).filter(Boolean)
+    const matchedParts = parts.filter(s => {
+      const cs = s.replace(/:(hover|focus|active|visited|link|target)/g, '')
+      return matchesAnyNode(treeNodes, cs)
+    })
+    const specificParts = matchedParts.filter(part => !isUniversalOnlySelector(part))
+    return specificParts.length > 0 ? specificParts : matchedParts
+  }
+
   function addRule(sel: string, props: Record<string, string>, media?: string) {
     if (!sel || sel === '*' || sel === 'body' || sel === 'html') return
     if (/stylesnap/i.test(sel)) return
     // Extract pseudo before splitting (selector may have :hover)
     const pseudo = extractPseudoFromSelector(sel)
     // For comma-separated selectors, keep only parts that match our tree
-    const cleanSels = sel.split(',').map(s => s.trim()).filter(s => {
-      const cs = s.replace(/:(hover|focus|active|visited|link|target)/g, '')
-      return matchesAnyNode(treeNodes, cs)
-    })
+    const cleanSels = filterLowValueSelectorParts(sel)
     if (cleanSels.length === 0) return
     sel = cleanSels.join(', ')
+    if (cleanSels.every(isUniversalOnlySelector)) return
     if (media) {
       mediaRules.push({ query: media, selector: sel, props })
     } else if (pseudo) {
@@ -1067,6 +1085,31 @@ function getComponentCSS(el: Element): ComponentCSS {
     }
   }
 
+  function walkRules(ruleList: CSSRuleList | CSSRule[], media?: string) {
+    for (const rule of Array.from(ruleList)) {
+      if (rule.type === CSSRule.STYLE_RULE) {
+        const sr = rule as CSSStyleRule
+        if (sr.selectorText) addRule(sr.selectorText, parseRulePropsRaw(sr.cssText), media)
+        continue
+      }
+      if (rule.type === CSSRule.MEDIA_RULE) {
+        const mr = rule as CSSMediaRule
+        const nextMedia = media ? `${media} and ${mr.conditionText}` : mr.conditionText
+        walkRules(mr.cssRules, nextMedia)
+        continue
+      }
+      const importedSheet = (rule as CSSImportRule).styleSheet
+      if (importedSheet) {
+        try { walkRules(importedSheet.cssRules, media) } catch (_) {}
+        continue
+      }
+      const grouped = rule as CSSGroupingRule
+      if ('cssRules' in grouped && grouped.cssRules) {
+        try { walkRules(grouped.cssRules, media) } catch (_) {}
+      }
+    }
+  }
+
   // Pass 1: external <link> sheets via CSSOM (normalized, but captures all rules)
   // Pass 2: <style> tags via raw text (preserves original formatting, takes priority)
   const sheets = Array.from(document.styleSheets)
@@ -1074,23 +1117,7 @@ function getComponentCSS(el: Element): ComponentCSS {
   for (const sheet of sheets) {
     const owner = sheet.ownerNode as HTMLElement | null
     if (owner?.tagName === 'STYLE') continue // skip, handle in pass 2
-    try {
-      for (const rule of sheet.cssRules) {
-        if (rule.type === CSSRule.STYLE_RULE) {
-          const sr = rule as CSSStyleRule
-          if (sr.selectorText) addRule(sr.selectorText, parseRulePropsRaw(sr.cssText))
-        }
-        if (rule.type === CSSRule.MEDIA_RULE) {
-          const mr = rule as CSSMediaRule
-          for (const cr of mr.cssRules) {
-            if (cr.type === CSSRule.STYLE_RULE) {
-              const sr = cr as CSSStyleRule
-              if (sr.selectorText) addRule(sr.selectorText, parseRulePropsRaw(sr.cssText), mr.conditionText)
-            }
-          }
-        }
-      }
-    } catch (_) {}
+    try { walkRules(sheet.cssRules) } catch (_) {}
   }
   // Process <style> tags second (overwrites CSSOM-normalized values with raw original)
   for (const sheet of sheets) {
@@ -1435,14 +1462,24 @@ function onKeyDown(e: KeyboardEvent) {
 // ─── CodePen Export Helpers ─────────────────────────────────────────
 
 function getComponentCSSForExport(el: Element, includeChildren = true, emitInherited = false): string {
+  const exportNodes = [el, ...Array.from(el.querySelectorAll('*'))]
+  const strippedMarkers = new Map<Element, string[]>()
+  for (const node of exportNodes) {
+    const ownMarkers = Array.from(node.classList).filter(c => c.startsWith('stylesnap-'))
+    if (ownMarkers.length === 0) continue
+    strippedMarkers.set(node, ownMarkers)
+    node.classList.remove(...ownMarkers)
+  }
+
+  try {
   const { rules, mediaRules, pseudoRules } = getComponentCSS(el)
 
   // Resolve CSS custom properties (var()) using computed style
   const computedEl = window.getComputedStyle(el)
-  function resolveVar(value: string): string {
+  function resolveVar(value: string, comp: CSSStyleDeclaration = computedEl): string {
     if (!value.includes('var(')) return value
     return value.replace(/var\((--[^,)]+)(?:,\s*([^)]+))?\)/g, (_, name: string, fallback: string | undefined) => {
-      const resolved = computedEl.getPropertyValue(name).trim()
+      const resolved = comp.getPropertyValue(name).trim()
       return resolved || fallback || name
     })
   }
@@ -1453,7 +1490,7 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
     for (const [k, v] of Object.entries(props)) {
       if (v.includes('var(')) {
         const compVal = comp.getPropertyValue(k).trim()
-        resolved[k] = compVal || resolveVar(v)
+        resolved[k] = compVal || resolveVar(v, comp)
       } else {
         resolved[k] = v
       }
@@ -1475,21 +1512,46 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
     'background', 'background-color', 'background-image', 'background-size',
     'overflow', 'overflow-x', 'overflow-y',
     'font-size', 'font-family', 'font-weight', 'line-height', 'letter-spacing',
+    'text-align', 'text-transform', 'white-space',
     'color', 'opacity', 'cursor', 'aspect-ratio',
     'transform', 'transition',
     'user-select', 'pointer-events',
   ])
 
-  // Build a computed-style block for the main element
-  function getComputedFallback(): Record<string, string> {
-    const fallback: Record<string, string> = {}
-    for (let i = 0; i < computedEl.length; i++) {
-      const prop = computedEl[i]
+  const FALLBACK_NOISE_PROPS = new Set([
+    'box-sizing',
+    'cursor',
+    'transition',
+    'user-select',
+    'pointer-events',
+  ])
+
+  const DIMENSION_PROPS = new Set([
+    'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+  ])
+
+  const INTRINSIC_SIZE_TAGS = new Set(['svg', 'img', 'video', 'canvas', 'iframe'])
+
+  const FLEXIBLE_SIZE_VALUE_RE = /(%|vw|vh|vmin|vmax|rem|em|ch|ex|lh|rlh|calc\(|clamp\(|min\(|max\(|fit-content|max-content|min-content)/i
+
+  function shouldKeepFallbackProp(node: Element, prop: string, value: string): boolean {
+    if (FALLBACK_NOISE_PROPS.has(prop)) return false
+    if (!DIMENSION_PROPS.has(prop)) return true
+    if (INTRINSIC_SIZE_TAGS.has(node.tagName.toLowerCase())) return true
+    return FLEXIBLE_SIZE_VALUE_RE.test(value)
+  }
+
+  // Build a computed-style block for the main element / descendants when authored
+  // rules are missing or too generic to survive export outside the page context.
+  function getComputedFallbackFor(node: Element, comp: CSSStyleDeclaration): Record<string, string> {
+    const raw: Record<string, string> = {}
+    for (let i = 0; i < comp.length; i++) {
+      const prop = comp[i]
       if (!LAYOUT_PROPS.has(prop)) continue
-      const val = computedEl.getPropertyValue(prop)
+      const val = comp.getPropertyValue(prop)
       if (!val || val === 'none' || val === 'auto' || val === 'normal') continue
       // Skip default-ish values
-      if (prop === 'box-sizing' && val === 'border-box') { fallback[prop] = val; continue }
+      if (prop === 'box-sizing' && val === 'border-box') { raw[prop] = val; continue }
       if (prop === 'display' && (val === 'block' || val === 'inline')) continue
       if (prop === 'position' && val === 'static') continue
       if (prop === 'flex-wrap' && val === 'nowrap') continue
@@ -1497,12 +1559,18 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
       if (prop === 'overflow' && val === 'visible') continue
       if (prop === 'opacity' && val === '1') continue
       if (prop === 'cursor' && val === 'auto') continue
-      fallback[prop] = val
+      raw[prop] = val
+    }
+    const filtered = filterDefaultStyles(node, raw)
+    const fallback: Record<string, string> = {}
+    for (const [prop, value] of Object.entries(filtered)) {
+      if (!shouldKeepFallbackProp(node, prop, value)) continue
+      fallback[prop] = value
     }
     return fallback
   }
 
-  const computedFallback = getComputedFallback()
+  const computedFallback = getComputedFallbackFor(el, computedEl)
 
   // ─── Extract :root / html custom properties (critical for rendering) ───
   // These define all theme variables (--primary, --background, etc.) that
@@ -1563,7 +1631,7 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
   // class added to the exported markup) so text renders faithfully. CSS-Scan style.
   if (emitInherited) {
     const inh: string[] = []
-    for (const p of ['color', 'font-family', 'font-size']) {
+    for (const p of ['color', 'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing', 'text-align', 'text-transform']) {
       const v = computedEl.getPropertyValue(p).trim()
       if (v) inh.push(`  ${p}: ${v};`)
     }
@@ -1600,13 +1668,52 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
     try { return Array.from(document.querySelectorAll(s.trim().replace(/:hover|:focus|:active/g, ''))).includes(el) } catch { return false }
   })
 
+  const selectorMatchesNode = (sel: string, node: Element) => sel.split(',').some(s => {
+    try {
+      const clean = s.trim().replace(/:hover|:focus|:active/g, '')
+      return !!clean && node.matches(clean)
+    } catch { return false }
+  })
+
+  const selectorHasSpecificTarget = (sel: string, node: Element) => sel.split(',').some(s => {
+    try {
+      const clean = s.trim().replace(/:hover|:focus|:active/g, '')
+      if (!clean || !node.matches(clean)) return false
+      return /[#.\[:>+~]/.test(clean) || /\s/.test(clean)
+    } catch { return false }
+  })
+
+  const sameProps = (a: Record<string, string>, b: Record<string, string>): boolean => {
+    const aKeys = Object.keys(a)
+    const bKeys = Object.keys(b)
+    if (aKeys.length !== bKeys.length) return false
+    for (const key of aKeys) {
+      if (a[key] !== b[key]) return false
+    }
+    return true
+  }
+
+  const resolveSelectorProps = (sel: string, props: Record<string, string>): Record<string, string> => {
+    const matchingNodes = exportNodes.filter(node => selectorMatchesNode(sel, node))
+    if (matchingNodes.length <= 1) return resolveProps(matchingNodes[0] || el, props)
+    const variants = matchingNodes.map(node => resolveProps(node, props))
+    return variants.every(variant => sameProps(variant, variants[0])) ? variants[0] : props
+  }
+
+  const readableSelectorFor = (node: Element): string => {
+    if ((node as HTMLElement).id) return `#${(node as HTMLElement).id}`
+    const classes = classNameOf(node).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-')).slice(0, 3)
+    const tagName = node.tagName.toLowerCase()
+    return classes.length > 0 ? `${tagName}.${classes.join('.')}` : tagName
+  }
+
   // Emit every matched rule as its OWN block, preserving the page's authored
   // selectors (CSS Scan style) — element's own rules (.btn, .demo-btn …) first,
   // then descendant rules (.btn svg …). When includeChildren is off, only the
   // element's own rules are emitted.
   const ruleSelectors = includeChildren ? [...elSelectors, ...otherSelectors] : elSelectors
   for (const sel of ruleSelectors) {
-    const props = resolveProps(el, rules.get(sel)!)
+    const props = resolveSelectorProps(sel, rules.get(sel)!)
     if (Object.keys(props).length === 0) continue
     const lines = Object.entries(props).map(([k, v]) => `  ${k}: ${v};`)
     cssLines.push(`${sel} {\n${lines.join('\n')}\n}`)
@@ -1628,7 +1735,7 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
   const pseudoMerged = new Map<string, Record<string, string>>()
   for (const pr of pseudoRules) {
     if (!includeChildren && !matchesEl(pr.selector)) continue
-    const props = resolveProps(el, pr.props)
+    const props = resolveSelectorProps(pr.selector, pr.props)
     if (Object.keys(props).length === 0) continue
     pseudoMerged.set(pr.selector, { ...(pseudoMerged.get(pr.selector) || {}), ...props })
   }
@@ -1639,16 +1746,54 @@ function getComponentCSSForExport(el: Element, includeChildren = true, emitInher
 
   // Media query rules
   const seen = new Set<string>()
+  const mediaBlocks: string[] = []
   for (const mr of mediaRules) {
     if (!includeChildren && !matchesEl(mr.selector)) continue
     const key = mr.query + mr.selector
     if (seen.has(key)) continue
     seen.add(key)
-    const props = resolveProps(el, mr.props)
+    const props = resolveSelectorProps(mr.selector, mr.props)
     const lines = Object.entries(props).map(([k, v]) => `  ${k}: ${v};`)
-    cssLines.push(`@media ${mr.query} {\n${mr.selector} {\n${lines.join('\n')}\n  }\n}`)
+    mediaBlocks.push(`@media ${mr.query} {\n${mr.selector} {\n${lines.join('\n')}\n  }\n}`)
   }
+
+  if (includeChildren) {
+    const computedSupplements = new Map<string, Record<string, string>>()
+    for (const node of exportNodes) {
+      const classes = classNameOf(node).split(/\s+/).filter(c => c && !c.startsWith('stylesnap-'))
+      const selector = readableSelectorFor(node)
+      if (!node.isConnected) continue
+      if (node !== el && !(node as HTMLElement).id && classes.length === 0) continue
+
+      const directSelectors = ruleSelectors.filter(sel => selectorMatchesNode(sel, node))
+      const hasSpecificAuthorRule = directSelectors.some(sel => selectorHasSpecificTarget(sel, node))
+      if (hasSpecificAuthorRule) continue
+
+      const authoredProps: Record<string, string> = {}
+      for (const sel of directSelectors) Object.assign(authoredProps, resolveProps(node, rules.get(sel)!))
+
+      const computedProps = getComputedFallbackFor(node, window.getComputedStyle(node))
+      const supplement: Record<string, string> = {}
+      for (const [prop, value] of Object.entries(computedProps)) {
+        if (authoredProps[prop] !== value) supplement[prop] = value
+      }
+      if (Object.keys(supplement).length === 0) continue
+
+      computedSupplements.set(selector, { ...(computedSupplements.get(selector) || {}), ...supplement })
+    }
+
+    for (const [selector, props] of computedSupplements) {
+      const lines = Object.entries(props).map(([k, v]) => `  ${k}: ${v};`)
+      cssLines.push(`${selector} {\n${lines.join('\n')}\n}`)
+    }
+  }
+
+  cssLines.push(...mediaBlocks)
+
   return cssLines.join('\n\n')
+  } finally {
+    for (const [node, ownMarkers] of strippedMarkers) node.classList.add(...ownMarkers)
+  }
 }
 
 
@@ -1847,4 +1992,3 @@ document.addEventListener('stylesnap-debug-unlock', (() => {
 }) as EventListener)
 
 } // end if (import.meta.env.DEV)
-
