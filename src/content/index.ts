@@ -17,11 +17,19 @@ body.stylesnap-mode-guidelines .stylesnap-guide{display:block}
 body.stylesnap-mode-grid *:not([data-stylesnap=true]):not([data-stylesnap=true] *){outline:1px solid rgba(147,51,234,.2)!important}
 body.stylesnap-mode-grid *:not([data-stylesnap=true]):not([data-stylesnap=true] *):hover{outline:1px solid rgba(147,51,234,.6)!important;background-color:rgba(147,51,234,.05)!important}
 `
-const _pageStyle = document.createElement('style')
-_pageStyle.id = 'stylesnap-page-css'
-_pageStyle.textContent = PAGE_CSS
-if (document.head) { document.head.appendChild(_pageStyle) }
-else if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { document.head.appendChild(_pageStyle) }, { once: true }) }
+if (!document.getElementById('stylesnap-page-css')) {
+  const _pageStyle = document.createElement('style')
+  _pageStyle.id = 'stylesnap-page-css'
+  _pageStyle.textContent = PAGE_CSS
+  if (document.head) { document.head.appendChild(_pageStyle) }
+  else if (document.readyState === 'loading') { 
+    document.addEventListener('DOMContentLoaded', () => { 
+      if (!document.getElementById('stylesnap-page-css')) {
+        document.head.appendChild(_pageStyle) 
+      }
+    }, { once: true }) 
+  }
+}
 
 import { parseElement, buildExportMarkup } from '@/lib/css-extractor'
 import { extractDesignTokens } from '@/lib/token-extractor'

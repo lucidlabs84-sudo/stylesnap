@@ -12,7 +12,15 @@ const SHADOW_HOST_ID = 'stylesnap-root'
 let _stShadow: ShadowRoot | null = null
 export function getStShadow(): ShadowRoot {
   if (_stShadow) return _stShadow
-  const host = document.createElement('div')
+
+  // If injected multiple times (e.g. via HMR), reuse the existing host to avoid duplicates
+  let host = document.getElementById(SHADOW_HOST_ID)
+  if (host && host.shadowRoot) {
+    _stShadow = host.shadowRoot
+    return _stShadow
+  }
+
+  host = document.createElement('div')
   host.id = SHADOW_HOST_ID
   host.setAttribute('data-stylesnap', 'true')
   // Use !important so aggressive host-page CSS (e.g. `div { position: relative
