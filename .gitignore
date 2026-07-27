@@ -48,3 +48,5 @@ src/assets/icons/
 push.sh
 push_to_github.py
 dist-demo/
+
+.env
