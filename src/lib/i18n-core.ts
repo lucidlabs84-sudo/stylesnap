@@ -106,6 +106,8 @@ export const translations = {
     continueToDodo: 'Continue to Dodo Payments',
     secureDodo: '🔒 Secure payment powered by Dodo',
     checkoutError: 'Failed to create checkout. Please try again.',
+    checkoutReload: 'StyleSnap was updated — reload this page, then try again',
+    checkoutOffline: "Can't reach our server — check your connection (VPN/proxy) and try again",
     // Features
     featUnlimited: 'Unlimited extractions',
     featUnlimitedDesc: 'No daily limits, extract as many elements as you want',
@@ -257,6 +259,8 @@ export const translations = {
     continueToDodo: '前往 Dodo Payments 结账',
     secureDodo: '🔒 Dodo 提供安全支付保障',
     checkoutError: '创建结账失败，请重试。',
+    checkoutReload: 'StyleSnap 刚更新过 — 请刷新本页后重试',
+    checkoutOffline: '连不上服务器 — 请检查网络连接（VPN/代理）后重试',
     // Features
     featUnlimited: '无限制提取',
     featUnlimitedDesc: '告别每日额度限制，随心所欲提取任何元素',

@@ -20,19 +20,30 @@ import { showError } from './notifications'
  * through the background service worker (host_permissions, no page CSP) and
  * rebuild a Response from its reply. In the service worker we fetch directly.
  */
+export const ERR_EXT_RELOADED = 'EXT_RELOADED'
+
 export async function proxyFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const inContentScript = typeof window !== 'undefined' && typeof document !== 'undefined'
   if (inContentScript && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    let reply: { ok?: boolean; status?: number; body?: string; error?: string } | undefined
     try {
-      const reply = await chrome.runtime.sendMessage({ type: 'SS_PROXY_FETCH', url, options })
-      if (reply && typeof reply.status === 'number') {
-        return new Response(reply.body ?? '', { status: reply.status })
-      }
-      throw new Error(reply?.error || 'No response from background')
-    } catch (e) {
-      // Fall back to a direct fetch (e.g. background unavailable in dev/demo).
-      return fetch(url, { ...options, headers: { ...(options.headers || {}) } })
+      reply = await chrome.runtime.sendMessage({ type: 'SS_PROXY_FETCH', url, options })
+    } catch {
+      // The content script is orphaned — the extension was updated or reloaded
+      // while this tab stayed open, so sendMessage throws "Extension context
+      // invalidated". Don't retry with a direct fetch here: from a content
+      // script the request carries the HOST PAGE's origin, which the proxy
+      // rejects with 403 and no CORS header, so the browser blocks it too.
+      // A doomed retry only turns a fixable problem into an opaque one.
+      throw new Error(ERR_EXT_RELOADED)
     }
+    // The background replies { ok:false, status:0 } when its own fetch failed.
+    // `new Response(..., { status: 0 })` throws RangeError (status must be
+    // 200-599), so guard the range instead of just the type.
+    if (!reply || typeof reply.status !== 'number' || reply.status < 200 || reply.status > 599) {
+      throw new Error(reply?.error || 'Network request failed')
+    }
+    return new Response(reply.body ?? '', { status: reply.status })
   }
   return fetch(url, { ...options, headers: { ...(options.headers || {}) } })
 }

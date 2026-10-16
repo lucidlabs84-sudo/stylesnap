@@ -1,7 +1,7 @@
 /** Feedback + Upgrade modals. Self-contained (ui + lib only). */
 import { $$, stAppend, showToast } from '../ui'
 import { detectLang, translations } from '@/lib/i18n-core'
-import { activateLicenseKey, createCheckout } from '@/lib/license'
+import { activateLicenseKey, createCheckout, ERR_EXT_RELOADED } from '@/lib/license'
 import { submitFeedback } from '@/lib/feedback'
 
 export async function showFeedbackModal() {
@@ -202,10 +202,21 @@ export async function showUpgradeModal() {
         const keyInput = modal.querySelector('#ss-upgrade-key') as HTMLInputElement | null
         if (keyInput) { keyInput.placeholder = 'Paste license key from email'; keyInput.focus() }
       }, 2000)
-    } catch {
+    } catch (e) {
       btn.disabled = false; btn.style.opacity = ''
       btn.textContent = t.upgradeToPro || 'Upgrade to Pro — $29'
-      showToast(t.checkoutError || 'Checkout unavailable — try again')
+      const reason = String((e as Error)?.message || '')
+      // A blocked/offline network surfaces as a rejected fetch in the background
+      // worker, which reaches us as one of these. Say so plainly — "try again"
+      // is useless advice when the box simply can't reach the server.
+      const offline = /failed to fetch|network|load failed|networkerror/i.test(reason)
+      showToast(
+        reason === ERR_EXT_RELOADED
+          ? (t.checkoutReload || 'StyleSnap was updated — reload this page, then try again')
+          : offline
+            ? (t.checkoutOffline || "Can't reach our server — check your connection (VPN/proxy) and try again")
+            : `${t.checkoutError || 'Checkout unavailable'} (${reason || 'unknown'})`
+      )
     }
   })
 
